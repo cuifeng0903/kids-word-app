@@ -5,18 +5,23 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>ことばあそび</title>
   <link rel="stylesheet" href="style.css">
+  <meta name="color-scheme" content="light">
 </head>
 <body>
   <main id="app">
     <!-- ホーム -->
-    <section id="home" class="screen active">
+    <section id="home" class="screen active" aria-label="ホーム">
       <h1 class="brand">ことばあそび</h1>
-      <button id="startBtn" class="btn primary big">はじめる</button>
-      <button id="parentBtn" class="btn ghost small" aria-label="保護者メニュー">ほごしゃ</button>
+      <p class="sub">きいて えらんで たのしく まなぼう！</p>
+      <div class="row">
+        <button id="startBtn" class="btn primary big">はじめる</button>
+        <button id="parentBtn" class="btn ghost small" aria-label="保護者メニュー">ほごしゃ</button>
+      </div>
+      <p id="homeHint" class="hint">※ はじめは サンプルのことば（sample.csv）を つかいます</p>
     </section>
 
     <!-- 学習 -->
-    <section id="learn" class="screen" aria-live="polite">
+    <section id="learn" class="screen" aria-live="polite" aria-label="学習">
       <div class="word" id="learnWord">apple</div>
       <div class="row">
         <button id="replayBtn" class="btn round" aria-label="もういちどきく">🔊</button>
@@ -24,20 +29,20 @@
       </div>
     </section>
 
-    <!-- クイズ -->
-    <section id="quiz" class="screen">
+    <!-- クイズ（4択） -->
+    <section id="quiz" class="screen" aria-label="クイズ">
       <div class="quiz-head">
-        <span id="quizWord">apple</span>
+        <span id="quizWord" class="quiz-word">apple</span>
         <button id="quizReplayBtn" class="btn round" aria-label="もういちどきく">🔊</button>
       </div>
-      <div id="choices" class="grid-2x2"></div>
-      <div id="progress" class="progress">0 / 5</div>
+      <div id="choices" class="grid-2x2" role="group" aria-label="えらんでね"></div>
+      <div id="progress" class="progress" aria-live="polite">0 / 5</div>
     </section>
 
     <!-- ごほうび -->
-    <section id="reward" class="screen">
+    <section id="reward" class="screen" aria-label="ごほうび">
       <p class="big">やったね！</p>
-      <div id="stickerSpot" class="sticker"></div>
+      <div id="stickerSpot" class="sticker" aria-hidden="true"></div>
       <div class="row">
         <button id="nextRoundBtn" class="btn primary">つづける</button>
         <button id="toHomeBtn" class="btn ghost">おわる</button>
@@ -45,37 +50,40 @@
     </section>
 
     <!-- 保護者 -->
-    <section id="parent" class="screen">
+    <section id="parent" class="screen" aria-label="保護者メニュー">
       <h2>保護者メニュー</h2>
+
       <div id="parentGate" class="card">
-        <p>ボタンを 3 びょう おしてから、1 + 2 をいれてください。</p>
-        <button id="holdButton" class="btn">ながおし</button>
-        <input id="gateAnswer" type="number" inputmode="numeric" placeholder="答え" />
-        <button id="enterParent" class="btn">ひらく</button>
+        <p>ボタンを <strong>3 びょう</strong> おしてから、<strong>1 + 2</strong> を いれてください。</p>
+        <div class="row">
+          <button id="holdButton" class="btn">ながおし</button>
+          <input id="gateAnswer" type="number" inputmode="numeric" placeholder="答え" aria-label="答え" />
+          <button id="enterParent" class="btn">ひらく</button>
+        </div>
       </div>
 
       <div id="parentPanel" class="card" hidden>
-        <label class="file">
-          CSV をよみこむ
-          <input id="csvInput" type="file" accept=".csv" />
-        </label>
+        <div class="field">
+          <label class="file">
+            CSV をよみこむ
+            <input id="csvInput" type="file" accept=".csv" />
+          </label>
+          <p class="hint">CSV は ヘッダー <code>word,japanese,pos</code> で はじめてください。</p>
+        </div>
 
-        <div class="row">
+        <div class="row wrap">
           <label>1かいの もんだいすう
             <select id="sessionSize">
-              <option value="5">5</option>
+              <option value="5" selected>5</option>
               <option value="10">10</option>
             </select>
           </label>
           <label>TTSことば
             <select id="ttsLang">
-              <option value="en-US">en-US</option>
+              <option value="en-US" selected>en-US</option>
               <option value="en-GB">en-GB</option>
             </select>
           </label>
-        </div>
-
-        <div class="row">
           <label>はやさ <input id="ttsRate" type="range" min="0.7" max="1.1" step="0.05" value="0.95"/></label>
           <label>ピッチ <input id="ttsPitch" type="range" min="0.8" max="1.2" step="0.05" value="1.05"/></label>
         </div>
@@ -85,10 +93,16 @@
           <button id="backHome" class="btn ghost">もどる</button>
         </div>
 
-        <details><summary>かいはつしゃログ</summary><pre id="devLog"></pre></details>
+        <details>
+          <summary>かいはつしゃログ</summary>
+          <pre id="devLog"></pre>
+        </details>
       </div>
     </section>
   </main>
+
+  <!-- 紙吹雪キャンバス（下部噴水） -->
+  <canvas id="confetti" class="confetti-canvas" aria-hidden="true"></canvas>
 
   <script src="app.js"></script>
 </body>
