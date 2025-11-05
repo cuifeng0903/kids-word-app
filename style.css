@@ -1,0 +1,31 @@
+:root { --accent:#4cafef; --ok:#2ecc71; --warn:#ffb74d; --text:#222; --bg:#fff; }
+* { box-sizing:border-box; }
+html,body { margin:0; background:var(--bg); color:var(--text); font-family: system-ui, "Nunito", sans-serif; }
+#app { max-width:720px; margin:0 auto; padding:16px; }
+.screen { display:none; min-height:100dvh; padding:16px; }
+.screen.active { display:grid; place-items:center; gap:24px; }
+.brand { font-size:32px; }
+.word { font-size:56px; font-weight:800; text-align:center; }
+.grid-2x2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; width:100%; }
+.choice, .btn { font-size:32px; padding:20px; border-radius:20px; border:0; }
+.choice { background:#f4f7fb; box-shadow:0 4px 0 rgba(0,0,0,.08); }
+.choice:active, .btn:active { transform:scale(0.98); }
+.btn.primary { background:var(--accent); color:#fff; }
+.btn.ghost { background:#eef3f8; }
+.btn.round { border-radius:50%; width:72px; height:72px; font-size:28px; }
+.btn.big { font-size:28px; padding:16px 28px; border-radius:18px; }
+.btn.warn { background:var(--warn); color:#222; }
+.progress { font-size:20px; opacity:.8; }
+.row { display:flex; gap:12px; align-items:center; justify-content:center; flex-wrap:wrap; }
+.quiz-head { display:flex; align-items:center; gap:12px; font-size:40px; }
+.big { font-size:32px; font-weight:700; }
+.card { width:100%; max-width:680px; padding:16px; border-radius:16px; background:#fafbfe; box-shadow:0 2px 8px rgba(0,0,0,.06); }
+.file input[type="file"] { display:block; margin-top:8px; }
+
+/* 演出（CSSのみ） */
+.correct-burst { animation: burst 700ms ease-out; }
+@keyframes burst { from { box-shadow:0 0 0 0 rgba(46,204,113,.8);} to { box-shadow:0 0 0 32px rgba(46,204,113,0);} }
+.shake { animation: shake 280ms ease-in-out; }
+@keyframes shake { 0%,100%{ transform:translateX(0);} 25%{ transform:translateX(-6px);} 75%{ transform:translateX(6px);} }
+.glow { box-shadow:0 0 0 4px rgba(76,175,239,.4); }
+.sticker { width:120px; height:120px; background: radial-gradient(circle at 30% 30%, #fff, #ffefc2); border-radius:20px; }
