@@ -11,7 +11,6 @@ html,body { margin:0; background:var(--bg); color:var(--text); font-family: syst
 .sub { margin: 0; opacity:.8; }
 .hint { font-size: 14px; opacity:.7; }
 
-.word { font-size:56px; font-weight:800; text-align:center; }
 .quiz-head { display:flex; align-items:center; gap:12px; font-size:40px; }
 .quiz-word { font-weight:800; }
 
