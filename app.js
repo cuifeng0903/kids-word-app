@@ -1,4 +1,6 @@
-// ====== 状態 ======
+// =====================
+//  状態
+// =====================
 const state = {
   entries: [],       // { id, word, japanese, pos }
   current: null,
@@ -9,25 +11,33 @@ const state = {
   missCountForCurrent: 0,
 };
 
-// ====== 画面切替 ======
+// 画面切替
 const screens = ['home', 'learn', 'quiz', 'reward', 'parent'];
 function show(id) {
   screens.forEach(s => document.getElementById(s).classList.remove('active'));
   document.getElementById(id).classList.add('active');
 }
 
-// ====== CSV 読み込み（最小・堅牢化） ======
+// =====================
+//  CSV 読み込み・検証
+// =====================
 function parseCsv(text) {
-  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-  if (!lines.length) return [];
-  const header = lines[0].split(',').map(h => h.trim());
+  const lines = text.split(/\r?\n/).map(l => l.trim());
+  // 空行削除（ただしヘッダー行の直後は維持）
+  const filtered = lines.filter((l, i) => (i === 0 ? true : l.length > 0));
+  if (!filtered.length) return [];
+  const header = filtered[0].split(',').map(h => h.trim());
   const idxWord = header.indexOf('word');
   const idxJa   = header.indexOf('japanese');
   const idxPos  = header.indexOf('pos');
+  if (idxWord < 0 || idxJa < 0 || idxPos < 0) {
+    logDev('ヘッダーが不正です。必要: word,japanese,pos');
+    return [];
+  }
   const out = [];
   const invalids = [];
-  for (let i = 1; i < lines.length; i++) {
-    const cols = splitCsvLine(lines[i]);
+  for (let i = 1; i < filtered.length; i++) {
+    const cols = splitCsvLine(filtered[i]);
     const word = (cols[idxWord] || '').trim();
     const jap  = (cols[idxJa] || '').trim();
     const pos  = (cols[idxPos] || '').trim();
@@ -38,7 +48,7 @@ function parseCsv(text) {
   if (invalids.length) logDev(`${invalids.length} 行スキップ: 行 ${invalids.join(', ')}`);
   return dedupeById(out);
 }
-// 簡易CSV行分割（カンマ＋引用符対応のライト版）
+// カンマ＆引用符の簡易対応
 function splitCsvLine(line) {
   const result = [];
   let cur = '', inQuotes = false;
@@ -56,7 +66,7 @@ function splitCsvLine(line) {
   result.push(cur);
   return result;
 }
-function normalizeId(word) { return word.toLowerCase().replace(/\s+/g, '-'); }
+function normalizeId(word) { return word.toLowerCase().trim().replace(/\s+/g, '-'); }
 function dedupeById(arr) {
   const map = new Map();
   for (const e of arr) map.set(e.id, e); // 後勝ち
@@ -64,7 +74,9 @@ function dedupeById(arr) {
   return [...map.values()];
 }
 
-// ====== TTS ======
+// =====================
+//  TTS（英→日 連続）
+// =====================
 function speakWord(text) {
   try {
     const u = new SpeechSynthesisUtterance(text);
@@ -77,11 +89,39 @@ function speakWord(text) {
   } catch (e) { logDev(`TTSエラー: ${e?.message || e}`); }
 }
 
-// ====== 出題選定・4択構築 ======
+function speakSequenceEnJa(word, japanese) {
+  try {
+    const u1 = new SpeechSynthesisUtterance(word);
+    u1.lang = state.tts.lang || 'en-US';
+    u1.rate = state.tts.rate;
+    u1.pitch = state.tts.pitch;
+    u1.volume = state.tts.volume;
+
+    const u2 = new SpeechSynthesisUtterance(japanese);
+    u2.lang = 'ja-JP';
+    u2.rate = 0.95;
+    u2.pitch = 1.05;
+    u2.volume = 0.8;
+
+    u1.onend = () => speechSynthesis.speak(u2);
+    u1.onerror = () => {};
+    u2.onerror = () => {};
+
+    speechSynthesis.cancel();
+    speechSynthesis.speak(u1);
+
+  } catch (e) {
+    logDev(`TTSシーケンスエラー: ${e?.message || e}`);
+  }
+}
+
+// =====================
+//  出題選定・4択構築
+// =====================
 function pickNext(entries) {
   const pool = entries.filter(e => !state.lastSeenIds.includes(e.id));
-  const choice = (pool.length ? pool : entries)[Math.floor(Math.random() * (pool.length ? pool.length : entries.length))];
-  // 履歴更新（直近10件）
+  const base = pool.length ? pool : entries;
+  const choice = base[Math.floor(Math.random() * base.length)];
   state.lastSeenIds.unshift(choice.id);
   state.lastSeenIds = [...new Set(state.lastSeenIds)].slice(0, 10);
   return choice;
@@ -99,7 +139,9 @@ function buildQuizOptions(entries, target) {
 function pickAndRemoveRandom(arr){ const i = Math.floor(Math.random()*arr.length); return arr.splice(i,1)[0]; }
 function shuffle(arr){ for(let i=arr.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]];} return arr; }
 
-// ====== レンダリング ======
+// =====================
+//  レンダリング
+// =====================
 function renderLearn() {
   document.getElementById('learnWord').textContent = state.current.word;
 }
@@ -117,25 +159,33 @@ function renderQuiz(options) {
   document.getElementById('progress').textContent = `${state.progressCount} / ${state.sessionSize}`;
 }
 
-// ====== 正誤処理 ======
+// =====================
+//  正誤処理
+// =====================
 function onChoice(opt, el) {
   if (opt.isCorrect) {
-    el.classList.add('correct-burst');
-    state.progressCount++;
-    saveProgress(state.current.id);
-    setTimeout(() => {
+    // 英語→日本語を連続で読み上げ（並行）
+    speakSequenceEnJa(state.current.word, state.current.japanese);
+
+    // 噴水状の紙吹雪 → 終了直後に次へ
+    confettiFountain({ duration: 1200, count: 180 }).then(() => {
+      state.progressCount++;
+      saveSticker(state.current.id);
+      state.missCountForCurrent = 0;
+
       if (state.progressCount >= state.sessionSize) {
+        showRewardIcon();
         show('reward');
       } else {
-        nextRound();
+        nextRound(); // アニメ直後にすぐ次の問題へ
       }
-    }, 700);
+    });
+
   } else {
     el.classList.add('shake');
-    speakFriendlyRetry();
     state.missCountForCurrent++;
     if (state.missCountForCurrent >= 2) {
-      // さりげなく正解ボタンにグロー付与
+      // さりげなく正解ボタンにグロー
       [...document.querySelectorAll('#choices .choice')].forEach(btn => {
         if (btn.textContent === state.current.japanese) btn.classList.add('glow');
       });
@@ -143,20 +193,128 @@ function onChoice(opt, el) {
     setTimeout(() => el.classList.remove('shake'), 320);
   }
 }
-function speakFriendlyRetry() {
-  // テキストでのフィードバック（音声は学習単語に限定）
-  // ここでは画面表示に留める or 無音。必要なら日本語TTS（ja-JP）で促すが今回は英単語TTSに限定。
+
+// =====================
+//  紙吹雪（下部噴水）
+// =====================
+function confettiFountain({ duration = 1200, count = 160 } = {}) {
+  const canvas = document.getElementById('confetti');
+  if (!canvas) return Promise.resolve();
+
+  // CSSサイズに合わせてピクセル調整
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(1, 0, 0, 1, 0, 0); // リセット
+  ctx.scale(dpr, dpr);
+
+  const W = rect.width;
+  const H = rect.height;
+  const originX = W / 2;   // 下部中央
+  const originY = H - 4;
+
+  const colors = ['#ff6f61','#6ec6ff','#ffd54f','#81c784','#b39ddb','#ff8a65','#4dd0e1','#f06292','#a5d6a7','#fff176'];
+  const shapes = ['rect','circle','rect','rect','circle'];
+
+  const particles = [];
+  for (let i = 0; i < count; i++) {
+    const angle = (Math.PI / 2) + (Math.random() * Math.PI / 5 - Math.PI / 10); // 75°〜105°
+    const speed = 6 + Math.random() * 6;
+    const size = 3 + Math.random() * 4;
+    particles.push({
+      x: originX + (Math.random() * 40 - 20),
+      y: originY,
+      vx: Math.cos(angle) * speed,
+      vy: -Math.sin(angle) * speed,
+      g: 0.18 + Math.random() * 0.12,
+      w: size, h: size * (0.8 + Math.random()*0.6),
+      rot: Math.random() * Math.PI,
+      spin: (Math.random() - 0.5) * 0.2,
+      color: colors[i % colors.length],
+      shape: shapes[i % shapes.length],
+      alpha: 1,
+      life: 800 + Math.random() * 600
+    });
+  }
+
+  const start = performance.now();
+  return new Promise(resolve => {
+    function tick(now) {
+      const elapsed = now - start;
+      ctx.clearRect(0, 0, W, H);
+
+      for (const p of particles) {
+        p.vy += p.g * 0.06;
+        p.x += p.vx;
+        p.y += p.vy;
+        p.rot += p.spin;
+
+        p.alpha = Math.max(0, 1 - elapsed / p.life);
+
+        ctx.globalAlpha = p.alpha;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        if (p.shape === 'rect') {
+          ctx.save();
+          ctx.translate(p.x, p.y);
+          ctx.rotate(p.rot);
+          ctx.fillRect(-p.w/2, -p.h/2, p.w, p.h);
+          ctx.restore();
+        } else {
+          ctx.arc(p.x, p.y, p.w/2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+      }
+
+      if (elapsed < duration) {
+        requestAnimationFrame(tick);
+      } else {
+        ctx.clearRect(0, 0, W, H);
+        resolve();
+      }
+    }
+    requestAnimationFrame(tick);
+  });
 }
 
-// ====== ライフサイクル ======
+// =====================
+//  ごほうび（30種アイコン）
+// =====================
+const REWARD_ICONS = [
+  // 動物
+  '🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯',
+  '🦁','🐮','🐷','🐸','🐵','🦄',
+  // 果物
+  '🍎','🍐','🍊','🍋','🍌','🍉','🍇','🍓','🍒','🍑',
+  '🥭','🍍','🥝','🍈'
+]; // 合計30
+
+function showRewardIcon() {
+  const spot = document.getElementById('stickerSpot');
+  if (!spot) return;
+  const icon = REWARD_ICONS[Math.floor(Math.random() * REWARD_ICONS.length)];
+  spot.textContent = icon;
+}
+
+// =====================
+//  ライフサイクル
+// =====================
 function startSession() {
+  if (!state.entries.length) {
+    logDev('単語データがありません。CSVを読み込んでください。');
+    show('parent');
+    return;
+  }
   state.progressCount = 0;
   state.current = pickNext(state.entries);
   state.missCountForCurrent = 0;
   renderLearn();
   show('learn');
-  // モバイルの自動再生対策：ユーザー操作後の呼び出し
-  speakWord(state.current.word);
+  speakWord(state.current.word); // モバイル自動再生対策：開始ボタンのジェスチャ後
 }
 function toQuiz() {
   const opts = buildQuizOptions(state.entries, state.current);
@@ -171,8 +329,10 @@ function nextRound() {
   speakWord(state.current.word);
 }
 
-// ====== 保護者・設定・保存 ======
-function saveProgress(id) {
+// =====================
+//  保存・設定
+// =====================
+function saveSticker(id) {
   const key = 'stickers.earned';
   const cur = JSON.parse(localStorage.getItem(key) || '[]');
   if (!cur.includes(id)) cur.push(id);
@@ -188,47 +348,78 @@ function saveSettings() {
 }
 function logDev(msg) {
   const el = document.getElementById('devLog');
-  if (!el) return;
-  el.textContent += `[${new Date().toLocaleTimeString()}] ${msg}\n`;
+  if (el) el.textContent += `[${new Date().toLocaleTimeString()}] ${msg}\n`;
+  // consoleにも出力
+  // eslint-disable-next-line no-console
+  console.log(msg);
 }
 
-// ====== イベント紐付け ======
+// =====================
+//  イベント
+// =====================
 window.addEventListener('DOMContentLoaded', () => {
   loadSettings();
 
-  // 体験用に sample.csv を自動ロード（本番では外すか、保護者で明示ロード）
-  fetch('./sample.csv').then(r => r.text()).then(t => {
-    state.entries = parseCsv(t);
-  }).catch(()=> logDev('sample.csv を読み込めませんでした'));
+  // 画面リサイズ時：紙吹雪キャンバス解像度を適用（描画は正答時のみ）
+  window.addEventListener('resize', () => {
+    const canvas = document.getElementById('confetti');
+    if (!canvas) return;
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+  });
 
-  // 主要ボタン
-  document.getElementById('startBtn').onclick = () => {
-    // 初回タップでオーディオコンテキスト・TTSを解禁
-    startSession();
-  };
-  document.getElementById('toQuizBtn').onclick = toQuiz;
-  document.getElementById('replayBtn').onclick = () => speakWord(state.current.word);
-  document.getElementById('quizReplayBtn').onclick = () => speakWord(state.current.word);
-  document.getElementById('nextRoundBtn').onclick = () => { state.progressCount = 0; nextRound(); };
-  document.getElementById('toHomeBtn').onclick = () => show('home');
+  // サンプルCSV自動ロード（配布簡便化のため）
+  fetch('./sample.csv')
+    .then(r => r.ok ? r.text() : Promise.reject('HTTP error'))
+    .then(text => {
+      state.entries = parseCsv(text);
+      logDev(`サンプルCSV読込: ${state.entries.length} 件`);
+    })
+    .catch(() => {
+      logDev('sample.csv を読み込めませんでした（保護者メニューからCSVを読み込んでください）');
+    });
 
-  // 保護者メニュー
+  // ホーム
+  document.getElementById('startBtn').onclick = () => startSession();
   document.getElementById('parentBtn').onclick = () => show('parent');
 
-  // 長押しゲート
+  // 学習
+  document.getElementById('toQuizBtn').onclick = () => toQuiz();
+  document.getElementById('replayBtn').onclick = () => state.current && speakWord(state.current.word);
+
+  // クイズ
+  document.getElementById('quizReplayBtn').onclick = () => state.current && speakWord(state.current.word);
+
+  // ごほうび
+  document.getElementById('nextRoundBtn').onclick = () => {
+    state.progressCount = 0;
+    nextRound();
+  };
+  document.getElementById('toHomeBtn').onclick = () => show('home');
+
+  // 保護者ゲート
   let holdTimer = null, held = false;
   const holdBtn = document.getElementById('holdButton');
   holdBtn.addEventListener('pointerdown', () => {
     held = false;
     holdTimer = setTimeout(() => { held = true; }, 3000);
   });
-  holdBtn.addEventListener('pointerup', () => clearTimeout(holdTimer));
+  const clearHold = () => { clearTimeout(holdTimer); };
+  holdBtn.addEventListener('pointerup', clearHold);
+  holdBtn.addEventListener('pointerleave', clearHold);
   document.getElementById('enterParent').onclick = () => {
     const ok = held && Number(document.getElementById('gateAnswer').value) === 3;
     if (ok) {
       document.getElementById('parentGate').hidden = true;
       document.getElementById('parentPanel').hidden = false;
     }
+  };
+  document.getElementById('backHome').onclick = () => {
+    document.getElementById('parentGate').hidden = false;
+    document.getElementById('parentPanel').hidden = true;
+    show('home');
   };
 
   // CSV入力
@@ -240,7 +431,7 @@ window.addEventListener('DOMContentLoaded', () => {
     logDev(`CSV読み込み: ${state.entries.length} 件`);
   });
 
-  // 設定
+  // 設定反映
   document.getElementById('sessionSize').addEventListener('change', (e) => {
     state.sessionSize = Number(e.target.value);
     saveSettings();
@@ -260,10 +451,5 @@ window.addEventListener('DOMContentLoaded', () => {
     localStorage.removeItem('stickers.earned');
     localStorage.removeItem('settings');
     logDev('進捗と設定をリセットしました');
-  };
-  document.getElementById('backHome').onclick = () => {
-    document.getElementById('parentGate').hidden = false;
-    document.getElementById('parentPanel').hidden = true;
-    show('home');
   };
 });
