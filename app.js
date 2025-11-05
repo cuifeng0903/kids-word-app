@@ -11,8 +11,8 @@ const state = {
   missCountForCurrent: 0,
 };
 
-// 画面切替
-const screens = ['home', 'learn', 'quiz', 'reward', 'parent'];
+// 画面切替（学習画面は廃止）
+const screens = ['home', 'quiz', 'reward', 'parent'];
 function show(id) {
   screens.forEach(s => document.getElementById(s).classList.remove('active'));
   document.getElementById(id).classList.add('active');
@@ -23,7 +23,6 @@ function show(id) {
 // =====================
 function parseCsv(text) {
   const lines = text.split(/\r?\n/).map(l => l.trim());
-  // 空行削除（ただしヘッダー行の直後は維持）
   const filtered = lines.filter((l, i) => (i === 0 ? true : l.length > 0));
   if (!filtered.length) return [];
   const header = filtered[0].split(',').map(h => h.trim());
@@ -48,7 +47,6 @@ function parseCsv(text) {
   if (invalids.length) logDev(`${invalids.length} 行スキップ: 行 ${invalids.join(', ')}`);
   return dedupeById(out);
 }
-// カンマ＆引用符の簡易対応
 function splitCsvLine(line) {
   const result = [];
   let cur = '', inQuotes = false;
@@ -88,7 +86,6 @@ function speakWord(text) {
     speechSynthesis.speak(u);
   } catch (e) { logDev(`TTSエラー: ${e?.message || e}`); }
 }
-
 function speakSequenceEnJa(word, japanese) {
   try {
     const u1 = new SpeechSynthesisUtterance(word);
@@ -140,11 +137,8 @@ function pickAndRemoveRandom(arr){ const i = Math.floor(Math.random()*arr.length
 function shuffle(arr){ for(let i=arr.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]];} return arr; }
 
 // =====================
-//  レンダリング
+//  レンダリング（クイズのみ）
 // =====================
-function renderLearn() {
-  document.getElementById('learnWord').textContent = state.current.word;
-}
 function renderQuiz(options) {
   document.getElementById('quizWord').textContent = state.current.word;
   const container = document.getElementById('choices');
@@ -160,14 +154,11 @@ function renderQuiz(options) {
 }
 
 // =====================
-//  正誤処理
+//  正誤処理（正答で紙吹雪＆英→日読み上げ→次へ）
 // =====================
 function onChoice(opt, el) {
   if (opt.isCorrect) {
-    // 英語→日本語を連続で読み上げ（並行）
     speakSequenceEnJa(state.current.word, state.current.japanese);
-
-    // 噴水状の紙吹雪 → 終了直後に次へ
     confettiFountain({ duration: 1200, count: 180 }).then(() => {
       state.progressCount++;
       saveSticker(state.current.id);
@@ -177,15 +168,14 @@ function onChoice(opt, el) {
         showRewardIcon();
         show('reward');
       } else {
-        nextRound(); // アニメ直後にすぐ次の問題へ
+        nextRound(); // アニメ直後にすぐ次へ
       }
     });
-
   } else {
     el.classList.add('shake');
     state.missCountForCurrent++;
     if (state.missCountForCurrent >= 2) {
-      // さりげなく正解ボタンにグロー
+      // さりげなく正解ボタンにグロー（日本語ラベル一致）
       [...document.querySelectorAll('#choices .choice')].forEach(btn => {
         if (btn.textContent === state.current.japanese) btn.classList.add('glow');
       });
@@ -201,19 +191,18 @@ function confettiFountain({ duration = 1200, count = 160 } = {}) {
   const canvas = document.getElementById('confetti');
   if (!canvas) return Promise.resolve();
 
-  // CSSサイズに合わせてピクセル調整
   const dpr = window.devicePixelRatio || 1;
   const rect = canvas.getBoundingClientRect();
   canvas.width = rect.width * dpr;
   canvas.height = rect.height * dpr;
 
   const ctx = canvas.getContext('2d');
-  ctx.setTransform(1, 0, 0, 1, 0, 0); // リセット
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.scale(dpr, dpr);
 
   const W = rect.width;
   const H = rect.height;
-  const originX = W / 2;   // 下部中央
+  const originX = W / 2;
   const originY = H - 4;
 
   const colors = ['#ff6f61','#6ec6ff','#ffd54f','#81c784','#b39ddb','#ff8a65','#4dd0e1','#f06292','#a5d6a7','#fff176'];
@@ -251,7 +240,6 @@ function confettiFountain({ duration = 1200, count = 160 } = {}) {
         p.x += p.vx;
         p.y += p.vy;
         p.rot += p.spin;
-
         p.alpha = Math.max(0, 1 - elapsed / p.life);
 
         ctx.globalAlpha = p.alpha;
@@ -301,7 +289,7 @@ function showRewardIcon() {
 }
 
 // =====================
-//  ライフサイクル
+//  ライフサイクル（クイズのみ）
 // =====================
 function startSession() {
   if (!state.entries.length) {
@@ -310,23 +298,15 @@ function startSession() {
     return;
   }
   state.progressCount = 0;
-  state.current = pickNext(state.entries);
-  state.missCountForCurrent = 0;
-  renderLearn();
-  show('learn');
-  speakWord(state.current.word); // モバイル自動再生対策：開始ボタンのジェスチャ後
-}
-function toQuiz() {
-  const opts = buildQuizOptions(state.entries, state.current);
-  renderQuiz(opts);
+  nextRound();     // 直ちに最初の問題へ
   show('quiz');
+  // 開始時に英単語を読み上げ（クイズ画面ヘッダの🔊でも再生可能）
+  state.current && speakWord(state.current.word);
 }
 function nextRound() {
   state.current = pickNext(state.entries);
-  state.missCountForCurrent = 0;
-  renderLearn();
-  show('learn');
-  speakWord(state.current.word);
+  const opts = buildQuizOptions(state.entries, state.current);
+  renderQuiz(opts);
 }
 
 // =====================
@@ -349,8 +329,6 @@ function saveSettings() {
 function logDev(msg) {
   const el = document.getElementById('devLog');
   if (el) el.textContent += `[${new Date().toLocaleTimeString()}] ${msg}\n`;
-  // consoleにも出力
-  // eslint-disable-next-line no-console
   console.log(msg);
 }
 
@@ -360,17 +338,19 @@ function logDev(msg) {
 window.addEventListener('DOMContentLoaded', () => {
   loadSettings();
 
-  // 画面リサイズ時：紙吹雪キャンバス解像度を適用（描画は正答時のみ）
-  window.addEventListener('resize', () => {
+  // キャンバス解像度更新
+  const resizeCanvas = () => {
     const canvas = document.getElementById('confetti');
     if (!canvas) return;
     const dpr = window.devicePixelRatio || 1;
     const rect = canvas.getBoundingClientRect();
     canvas.width = rect.width * dpr;
     canvas.height = rect.height * dpr;
-  });
+  };
+  window.addEventListener('resize', resizeCanvas);
+  resizeCanvas();
 
-  // サンプルCSV自動ロード（配布簡便化のため）
+  // サンプルCSV自動ロード
   fetch('./sample.csv')
     .then(r => r.ok ? r.text() : Promise.reject('HTTP error'))
     .then(text => {
@@ -385,10 +365,6 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('startBtn').onclick = () => startSession();
   document.getElementById('parentBtn').onclick = () => show('parent');
 
-  // 学習
-  document.getElementById('toQuizBtn').onclick = () => toQuiz();
-  document.getElementById('replayBtn').onclick = () => state.current && speakWord(state.current.word);
-
   // クイズ
   document.getElementById('quizReplayBtn').onclick = () => state.current && speakWord(state.current.word);
 
@@ -396,17 +372,19 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('nextRoundBtn').onclick = () => {
     state.progressCount = 0;
     nextRound();
+    show('quiz');
+    state.current && speakWord(state.current.word);
   };
   document.getElementById('toHomeBtn').onclick = () => show('home');
 
   // 保護者ゲート
   let holdTimer = null, held = false;
   const holdBtn = document.getElementById('holdButton');
+  const clearHold = () => { clearTimeout(holdTimer); };
   holdBtn.addEventListener('pointerdown', () => {
     held = false;
     holdTimer = setTimeout(() => { held = true; }, 3000);
   });
-  const clearHold = () => { clearTimeout(holdTimer); };
   holdBtn.addEventListener('pointerup', clearHold);
   holdBtn.addEventListener('pointerleave', clearHold);
   document.getElementById('enterParent').onclick = () => {
