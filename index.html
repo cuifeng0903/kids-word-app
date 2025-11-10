@@ -4,19 +4,48 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>ことばあそび（クイズのみ）</title>
-  <link rel="stylesheet" href="style.css">
+  <!-- style -->
+  ./style.css
   <meta name="color-scheme" content="light">
 </head>
 <body>
   <main id="app">
-    <!-- ホーム -->
+    <!-- ホーム（出題設定つき） -->
     <section id="home" class="screen active" aria-label="ホーム">
       <h1 class="brand">ことばあそび</h1>
       <p class="sub">きいて えらんで たのしく まなぼう！</p>
+
+      <!-- 出題設定 -->
+      <section class="card" aria-label="出題設定">
+        <h2 class="card-title">出題設定</h2>
+
+        <div class="field">
+          <label class="block">通番の範囲（<span id="rangeMinMax">-</span>）
+            <div class="row wrap">
+              <input id="rangeStart" type="number" class="num" aria-label="通番開始" />
+              <span>〜</span>
+              <input id="rangeEnd" type="number" class="num" aria-label="通番終了" />
+            </div>
+          </label>
+          <p class="hint">※ CSVの「通番」列を使います</p>
+        </div>
+
+        <div class="field">
+          <label class="block">品詞（複数えらべます）</label>
+          <div id="posFilter" class="chips" role="group" aria-label="品詞フィルタ">
+            <!-- CSV読込後に自動生成（既定で全選択） -->
+          </div>
+          <p class="hint">未選択の場合は自動で「全品詞」として扱います</p>
+        </div>
+
+        <p id="startError" class="error" aria-live="polite" hidden></p>
+      </section>
+
       <div class="row">
         <button id="startBtn" class="btn primary big">はじめる</button>
         <button id="parentBtn" class="btn ghost small" aria-label="保護者メニュー">ほごしゃ</button>
       </div>
+
       <p id="homeHint" class="hint">※ はじめは サンプルのことば（sample.csv）を つかいます</p>
     </section>
 
@@ -59,7 +88,7 @@
             CSV をよみこむ
             <input id="csvInput" type="file" accept=".csv" />
           </label>
-          <p class="hint">CSV は ヘッダー <code>word,japanese,pos</code> で はじめてください。</p>
+          <p class="hint">CSV ヘッダー：<code>通番,英単語,日本語訳,品詞</code></p>
         </div>
 
         <div class="row wrap">
@@ -92,9 +121,11 @@
     </section>
   </main>
 
-  <!-- 紙吹雪キャンバス（下部噴水） -->
+  <!-- マーク表示（〇/× の大きな表示） -->
+  <div id="markOverlay" class="mark-overlay" aria-hidden="true"></div>
+
+  <!-- 紙吹雪キャンバス（下部噴水・豪華版） -->
   <canvas id="confetti" class="confetti-canvas" aria-hidden="true"></canvas>
 
-  <script src="app.js"></script>
-</body>
-</html>
+  <!-- app -->
+  <script src="./app.js"></script>
