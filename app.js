@@ -15,7 +15,7 @@ const state = {
 };
 
 // 画面切替
-const screens = ['home', 'quiz', 'reward', 'parent'];
+const screens = ['home', 'quiz', 'reward', 'rewards', 'parent'];
 function show(id) {
   screens.forEach(s => document.getElementById(s).classList.remove('active'));
   document.getElementById(id).classList.add('active');
@@ -23,7 +23,6 @@ function show(id) {
 
 // =====================
 //  CSV 読み込み・検証（日本語ヘッダー）
-//  ヘッダー互換：通番/英単語/日本語訳/品詞 か、旧: word/japanese/pos/番号 も許容
 // =====================
 function parseCsv(text) {
   const lines = text.split(/\r?\n/);
@@ -35,7 +34,7 @@ function parseCsv(text) {
 
   const header = splitCsvLine(lines[0]).map(h => h.trim());
 
-  const idxSeq = findHeader(header, ['通番','seq','番号','id','index']);
+  const idxSeq  = findHeader(header, ['通番','seq','番号','id','index']);
   const idxWord = findHeader(header, ['英単語','word','単語']);
   const idxJa   = findHeader(header, ['日本語訳','japanese','訳','和訳']);
   const idxPos  = findHeader(header, ['品詞','pos']);
@@ -72,7 +71,6 @@ function parseCsv(text) {
   }
   return out;
 }
-
 function findHeader(arr, candidates) {
   const lower = arr.map(s => s.toLowerCase());
   for (const cand of candidates) {
@@ -81,8 +79,7 @@ function findHeader(arr, candidates) {
   }
   return -1;
 }
-
-// カンマ・引用符対応の軽量CSV分割
+// CSV 1行パース（引用符対応の軽量版）
 function splitCsvLine(line) {
   const result = [];
   let cur = '', inQuotes = false;
@@ -115,7 +112,6 @@ function speakWord(text) {
     speechSynthesis.speak(u);
   } catch (e) { logDev(`TTSエラー: ${e?.message || e}`); }
 }
-
 function speakSequenceEnJa(word, japanese) {
   return new Promise(resolve => {
     try {
@@ -133,8 +129,8 @@ function speakSequenceEnJa(word, japanese) {
 
       u1.onend = () => speechSynthesis.speak(u2);
       u2.onend = resolve;
-      u1.onerror = (e)=>{ logDev('TTS英語エラー'); resolve(); };
-      u2.onerror = (e)=>{ logDev('TTS日本語エラー'); resolve(); };
+      u1.onerror = ()=>{ logDev('TTS英語エラー'); resolve(); };
+      u2.onerror = ()=>{ logDev('TTS日本語エラー'); resolve(); };
 
       speechSynthesis.cancel();
       speechSynthesis.speak(u1);
@@ -160,7 +156,7 @@ function applyFilters() {
 }
 
 // =====================
-//  出題選定・4択構築（フィルタ後の集合から）
+//  出題選定・4択構築
 // =====================
 function pickNext() {
   if (!state.filtered.length) return null;
@@ -175,7 +171,6 @@ function pickNext() {
   state.lastSeenIds = [...new Set(state.lastSeenIds)].slice(0, 10);
   return choice;
 }
-
 function buildQuizOptions(target) {
   const entries = state.filtered;
   const samePOS = entries.filter(e => e.pos === target.pos && e.seq !== target.seq);
@@ -185,7 +180,7 @@ function buildQuizOptions(target) {
   while (distractors.length < 3 && samePOS.length) distractors.push(pickAndRemoveRandom(samePOS));
   while (distractors.length < 3 && others.length)  distractors.push(pickAndRemoveRandom(others));
 
-  // 4択不足のときはやさしく不足分をランダム補完（安全策）
+  // 4択不足の安全補完
   if (distractors.length < 3) {
     const rest = entries.filter(e => e.seq !== target.seq && !distractors.includes(e));
     while (distractors.length < 3 && rest.length) distractors.push(pickAndRemoveRandom(rest));
@@ -195,12 +190,11 @@ function buildQuizOptions(target) {
     .map(e => ({ id:e.seq, label:e.japanese, isCorrect:!!e.isCorrect }));
   return options;
 }
-
 function pickAndRemoveRandom(arr){ const i = Math.floor(Math.random()*arr.length); return arr.splice(i,1)[0]; }
 function shuffle(arr){ for(let i=arr.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]];} return arr; }
 
 // =====================
-//  レンダリング（クイズのみ）
+//  レンダリング（クイズ）
 // =====================
 function renderQuiz(options) {
   document.getElementById('quizWord').textContent = state.current.word;
@@ -225,10 +219,10 @@ function onChoice(opt, el) {
   if (opt.isCorrect) {
     showMark('ok'); // 〇
 
-    // 英→日読み上げ と 豪華紙吹雪 を同時開始し、両方の完了を待つ
+    // 英→日読み上げ と 豪華紙吹雪 を同時開始し、両完了後に遷移
     Promise.all([
       speakSequenceEnJa(state.current.word, state.current.japanese),
-      confettiFountain({ duration: 1600, count: 320, emitters: 3, sparkles: true })
+      confettiFountain({ duration: 1700, count: 360, emitters: 3, sparkles: true })
     ]).then(() => {
       hideMark();
       state.progressCount++;
@@ -236,7 +230,8 @@ function onChoice(opt, el) {
       state.missCountForCurrent = 0;
 
       if (state.progressCount >= state.sessionSize) {
-        showRewardIcon();
+        const icon = showRewardIcon();     // 表示
+        addRewardHistory(icon);            // 履歴に保存（当日分として）
         show('reward');
       } else {
         nextRound(); // TTS日本語完了＆紙吹雪完了のあとで遷移
@@ -274,8 +269,6 @@ function hideMark() {
 
 // =====================
 //  紙吹雪（下部噴水・豪華版）
-//  - 複数エミッタ（中央・左右）
-//  - 星形スパークルを混ぜる
 // =====================
 function confettiFountain({ duration = 1600, count = 320, emitters = 3, sparkles = true } = {}) {
   const canvas = document.getElementById('confetti');
@@ -331,48 +324,49 @@ function confettiFountain({ duration = 1600, count = 320, emitters = 3, sparkles
   return new Promise(resolve => {
     function tick(now) {
       const elapsed = now - start;
-      ctx.clearRect(0, 0, W, H);
+      const dt = 1; // 簡易
+
+      const ctx2d = ctx;
+      ctx2d.clearRect(0, 0, W, H);
 
       for (const p of particles) {
-        p.vy += p.g * 0.06;
-        p.x += p.vx;
-        p.y += p.vy;
-        p.rot += p.spin;
+        p.vy += p.g * 0.06 * dt;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.rot += p.spin * dt;
         p.alpha = Math.max(0, 1 - elapsed / p.life);
 
-        ctx.globalAlpha = p.alpha;
-        ctx.fillStyle = p.color;
+        ctx2d.globalAlpha = p.alpha;
+        ctx2d.fillStyle = p.color;
 
         if (p.shape === 'rect') {
-          ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot);
-          ctx.fillRect(-p.w/2, -p.h/2, p.w, p.h); ctx.restore();
+          ctx2d.save(); ctx2d.translate(p.x, p.y); ctx2d.rotate(p.rot);
+          ctx2d.fillRect(-p.w/2, -p.h/2, p.w, p.h); ctx2d.restore();
         } else if (p.shape === 'circle') {
-          ctx.beginPath(); ctx.arc(p.x, p.y, p.w/2, 0, Math.PI*2); ctx.fill();
+          ctx2d.beginPath(); ctx2d.arc(p.x, p.y, p.w/2, 0, Math.PI*2); ctx2d.fill();
         } else if (p.shape === 'star') {
-          drawStar(ctx, p.x, p.y, 5, p.w, p.w/2, p.rot, p.color);
+          drawStar(ctx2d, p.x, p.y, 5, p.w, p.w/2, p.rot, p.color);
         }
 
-        ctx.globalAlpha = 1;
+        ctx2d.globalAlpha = 1;
       }
 
       if (elapsed < duration) {
         requestAnimationFrame(tick);
       } else {
-        ctx.clearRect(0, 0, W, H);
+        ctx2d.clearRect(0, 0, W, H);
         resolve();
       }
     }
     requestAnimationFrame(tick);
   });
 }
-
 function drawStar(ctx, x, y, spikes, outerR, innerR, rot, color) {
   let rotA = Math.PI / 2 * 3;
-  let cx = x, cy = y;
   let step = Math.PI / spikes;
 
   ctx.save();
-  ctx.translate(cx, cy);
+  ctx.translate(x, y);
   ctx.rotate(rot);
   ctx.beginPath();
   ctx.moveTo(0, -outerR);
@@ -389,7 +383,7 @@ function drawStar(ctx, x, y, spikes, outerR, innerR, rot, color) {
 }
 
 // =====================
-//  ごほうび（30種アイコン）
+//  ごほうび（セッション終了）
 // =====================
 const REWARD_ICONS = [
   // 動物
@@ -402,54 +396,79 @@ const REWARD_ICONS = [
 
 function showRewardIcon() {
   const spot = document.getElementById('stickerSpot');
-  if (!spot) return;
+  if (!spot) return null;
   const icon = REWARD_ICONS[Math.floor(Math.random() * REWARD_ICONS.length)];
   spot.textContent = icon;
+  return icon;
 }
 
-// =====================
-//  ライフサイクル（クイズ開始前にフィルタを確定）
-// =====================
-function startSession() {
-  if (!state.entries.length) {
-    logDev('単語データがありません。CSVを読み込んでください。');
-    show('parent');
+// ---- ごほうび履歴（直近30日・日付降順で表示） ----
+function addRewardHistory(icon) {
+  if (!icon) return;
+  const key = 'rewards.history';
+  const data = JSON.parse(localStorage.getItem(key) || '{}'); // { 'YYYY-MM-DD': ['🍎','🐶', ...] }
+  const todayKey = dateKey(new Date());
+  data[todayKey] = Array.isArray(data[todayKey]) ? data[todayKey] : [];
+  data[todayKey].push(icon);
+  localStorage.setItem(key, JSON.stringify(data));
+}
+function getRewardHistory() {
+  const key = 'rewards.history';
+  return JSON.parse(localStorage.getItem(key) || '{}');
+}
+function renderRewardsList() {
+  const wrap = document.getElementById('rewardsList');
+  wrap.innerHTML = '';
+
+  const data = getRewardHistory(); // {dateKey: [icons]}
+  const keys = Object.keys(data);
+  if (!keys.length) {
+    const empty = document.createElement('p');
+    empty.className = 'hint';
+    empty.textContent = 'まだ ごほうび は ありません';
+    wrap.appendChild(empty);
     return;
   }
 
-  // 入力値からフィルタ確定
-  readFilterInputs();
-  applyFilters();
+  // 日付降順・直近30日まで
+  keys.sort((a,b) => (a < b ? 1 : -1));
+  const limited = keys.slice(0, 30);
 
-  // 最低4件ないと4択が成立しない
-  if (state.filtered.length < 4) {
-    const msg = `出題範囲に ${state.filtered.length} 件しかありません（4件以上必要です）。通番や品詞を見直してください。`;
-    showStartError(msg, true);
-    return;
+  for (const k of limited) {
+    const row = document.createElement('div');
+    row.className = 'reward-day';
+
+    const dateEl = document.createElement('div');
+    dateEl.className = 'reward-date';
+    dateEl.textContent = formatJaMd(k); // 「11月11日」のように表示
+
+    const iconsEl = document.createElement('div');
+    iconsEl.className = 'reward-icons';
+    (data[k] || []).forEach(icon => {
+      const span = document.createElement('span');
+      span.textContent = icon;
+      iconsEl.appendChild(span);
+    });
+
+    row.appendChild(dateEl);
+    row.appendChild(iconsEl);
+    wrap.appendChild(row);
   }
-  showStartError('', false);
-
-  state.progressCount = 0;
-  state.lastSeenIds = [];
-  nextRound();     // 最初の問題
-  show('quiz');
-  // 開始時に英単語を読み上げ（ヘッダの🔊でも再生可能）
-  state.current && speakWord(state.current.word);
 }
-
-function nextRound() {
-  state.current = pickNext();
-  if (!state.current) {
-    logDev('出題データが空です');
-    show('home');
-    return;
-  }
-  const opts = buildQuizOptions(state.current);
-  renderQuiz(opts);
+function dateKey(d) {
+  // ローカル日付で YYYY-MM-DD
+  const year = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${m}-${day}`;
+}
+function formatJaMd(key) {
+  const [y, m, d] = key.split('-').map(n => Number(n));
+  return `${m}月${d}日`;
 }
 
 // =====================
-//  入力UI（ホームの範囲・品詞）
+//  ホームの出題設定UI
 // =====================
 function populateHomeFilters() {
   const minMaxEl = document.getElementById('rangeMinMax');
@@ -457,8 +476,10 @@ function populateHomeFilters() {
   const endEl = document.getElementById('rangeEnd');
   const posWrap = document.getElementById('posFilter');
 
-  // 通番の初期表示
   const { minSeq, maxSeq, posSet } = state.dataset;
+  if (minSeq == null || maxSeq == null) return;
+
+  // 通番の初期表示
   minMaxEl.textContent = `${minSeq} 〜 ${maxSeq}`;
   startEl.value = minSeq;
   endEl.value = maxSeq;
@@ -477,7 +498,6 @@ function populateHomeFilters() {
     posWrap.appendChild(chip);
   });
 }
-
 function readFilterInputs() {
   const startEl = document.getElementById('rangeStart');
   const endEl = document.getElementById('rangeEnd');
@@ -497,7 +517,6 @@ function readFilterInputs() {
 
   state.filters = { start: s, end: e, posSelected };
 }
-
 function showStartError(msg, show) {
   const el = document.getElementById('startError');
   if (!show) { el.hidden = true; el.textContent = ''; return; }
@@ -525,6 +544,45 @@ function logDev(msg) {
   const el = document.getElementById('devLog');
   if (el) el.textContent += `[${new Date().toLocaleTimeString()}] ${msg}\n`;
   console.log(msg);
+}
+
+// =====================
+//  セッション制御
+// =====================
+function startSession() {
+  if (!state.entries.length) {
+    logDev('単語データがありません。CSVを読み込んでください。');
+    show('parent');
+    return;
+  }
+
+  // 入力値からフィルタ確定
+  readFilterInputs();
+  applyFilters();
+
+  // 最低4件ないと4択が成立しない
+  if (state.filtered.length < 4) {
+    const msg = `出題範囲に ${state.filtered.length} 件しかありません（4件以上必要です）。通番や品詞を見直してください。`;
+    showStartError(msg, true);
+    return;
+  }
+  showStartError('', false);
+
+  state.progressCount = 0;
+  state.lastSeenIds = [];
+  nextRound();     // 最初の問題
+  show('quiz');
+  state.current && speakWord(state.current.word); // 開始時に英単語を読み上げ
+}
+function nextRound() {
+  state.current = pickNext();
+  if (!state.current) {
+    logDev('出題データが空です');
+    show('home');
+    return;
+  }
+  const opts = buildQuizOptions(state.current);
+  renderQuiz(opts);
 }
 
 // =====================
@@ -561,12 +619,13 @@ window.addEventListener('DOMContentLoaded', () => {
 
   // ホーム
   document.getElementById('startBtn').onclick = () => startSession();
+  document.getElementById('rewardsBtn').onclick = () => { renderRewardsList(); show('rewards'); };
   document.getElementById('parentBtn').onclick = () => show('parent');
 
   // クイズ
   document.getElementById('quizReplayBtn').onclick = () => state.current && speakWord(state.current.word);
 
-  // ごほうび
+  // ごほうび（セッション終了画面）
   document.getElementById('nextRoundBtn').onclick = () => {
     state.progressCount = 0;
     // フィルタは維持（同条件で続ける）
@@ -581,6 +640,9 @@ window.addEventListener('DOMContentLoaded', () => {
     state.current && speakWord(state.current.word);
   };
   document.getElementById('toHomeBtn').onclick = () => show('home');
+
+  // ごほうび一覧
+  document.getElementById('rewardsBackBtn').onclick = () => show('home');
 
   // 保護者ゲート
   let holdTimer = null, held = false;
@@ -636,7 +698,6 @@ window.addEventListener('DOMContentLoaded', () => {
   [rs, re].forEach(el => el.addEventListener('change', () => {
     const s = Number(rs.value), e = Number(re.value);
     if (Number.isFinite(s) && Number.isFinite(e) && s > e) {
-      // 視覚的な注意（入替は開始時に自動で行う）
       showStartError('通番の開始/終了が逆転しています（開始の方が小さくなるようにしてください）', true);
     } else {
       showStartError('', false);
@@ -647,6 +708,7 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('resetProgress').onclick = () => {
     localStorage.removeItem('stickers.earned');
     localStorage.removeItem('settings');
-    logDev('進捗と設定をリセットしました');
+    localStorage.removeItem('rewards.history'); // ごほうび履歴もクリア
+    logDev('進捗・設定・ごほうび履歴をリセットしました');
   };
 });
