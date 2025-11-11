@@ -15,8 +15,15 @@
       <h1 class="brand">ことばあそび</h1>
       <p class="sub">きいて えらんで たのしく まなぼう！</p>
 
-      <!-- 出題設定 -->
-      <section class="card" aria-label="出題設定">
+      <!-- 先頭にボタン群（上部配置） -->
+      <div class="row top-actions">
+        <button id="startBtn" class="btn primary big">はじめる</button>
+        <button id="rewardsBtn" class="btn ghost big" aria-label="ごほうび一覧">ごほうび</button>
+        <button id="parentBtn" class="btn ghost small" aria-label="保護者メニュー">ほごしゃ</button>
+      </div>
+
+      <!-- 出題設定（下部配置） -->
+      <section class="card settings-card" aria-label="出題設定">
         <h2 class="card-title">出題設定</h2>
 
         <div class="field">
@@ -41,11 +48,6 @@
         <p id="startError" class="error" aria-live="polite" hidden></p>
       </section>
 
-      <div class="row">
-        <button id="startBtn" class="btn primary big">はじめる</button>
-        <button id="parentBtn" class="btn ghost small" aria-label="保護者メニュー">ほごしゃ</button>
-      </div>
-
       <p id="homeHint" class="hint">※ はじめは サンプルのことば（sample.csv）を つかいます</p>
     </section>
 
@@ -59,13 +61,23 @@
       <div id="progress" class="progress" aria-live="polite">0 / 5</div>
     </section>
 
-    <!-- ごほうび -->
+    <!-- ごほうび（セッション終了時） -->
     <section id="reward" class="screen" aria-label="ごほうび">
       <p class="big">やったね！</p>
       <div id="stickerSpot" class="sticker" aria-hidden="true"></div>
       <div class="row">
         <button id="nextRoundBtn" class="btn primary">つづける</button>
         <button id="toHomeBtn" class="btn ghost">おわる</button>
+      </div>
+    </section>
+
+    <!-- ごほうび一覧（直近30日） -->
+    <section id="rewards" class="screen" aria-label="ごほうび一覧">
+      <h2 class="brand">ごほうび</h2>
+      <p class="hint">直近30日分を ひょうじします</p>
+      <div id="rewardsList" class="rewards-list" aria-live="polite"></div>
+      <div class="row">
+        <button id="rewardsBackBtn" class="btn ghost">もどる</button>
       </div>
     </section>
 
@@ -121,13 +133,13 @@
     </section>
   </main>
 
-  <!-- マーク表示（〇/× の大きな表示） -->
+  <!-- 〇/× の大きな表示 -->
   <div id="markOverlay" class="mark-overlay" aria-hidden="true"></div>
 
   <!-- 紙吹雪キャンバス（下部噴水・豪華版） -->
   <canvas id="confetti" class="confetti-canvas" aria-hidden="true"></canvas>
 
   <!-- app -->
-  <script src="./app.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>
