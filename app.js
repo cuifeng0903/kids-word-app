@@ -711,4 +711,13 @@ window.addEventListener('DOMContentLoaded', () => {
     localStorage.removeItem('rewards.history'); // ごほうび履歴もクリア
     logDev('進捗・設定・ごほうび履歴をリセットしました');
   };
+
+  // ===== PWA: Service Worker registration =====
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js')
+      .catch(err => console.error('SW registration failed:', err));
+  });
+}
+  
 });
