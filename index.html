@@ -3,171 +3,135 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ことばあそび（クイズのみPWA）</title>
 
-  <!-- PWA: meta -->
-  <meta name="theme-color" content="#0b2a3d" />
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="stylesheet" href="./style.css">
+  <meta a name="theme-color" content="#0b213d">
 
-  <!-- PWA: icons -->
-  <link rel="icon" href="./kids-word-192.png" />
-  <link rel="apple-touch-icon" href="./kids-word-192.png" />
-
-  <!-- PWA: manifest -->
-  <link rel="manifest" href="./manifest.webmanifest">
-  
-  <title>ことばあそび（クイズのみ）</title>
-  <!-- style -->
-  <link rel="stylesheet" href="style.css">
-  <meta name="color-scheme" content="light">
+  <!-- iOS用 -->
+  <link rel="apple-touch-icon" href="./eta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
 </head>
 <body>
   <main id="app">
-    <!-- ホーム（出題設定つき） -->
+    <!-- ホーム -->
     <section id="home" class="screen active" aria-label="ホーム">
       <h1 class="brand">ことばあそび</h1>
       <p class="sub">きいて えらんで たのしく まなぼう！</p>
 
-      <!-- 先頭にボタン群（上部配置） -->
+      <!-- 上部ボタン -->
       <div class="row top-actions">
         <button id="startBtn" class="btn primary big">はじめる</button>
-        <button id="rewardsBtn" class="btn ghost big" aria-label="ごほうび一覧">ごほうび</button>
-        <button id="parentBtn" class="btn ghost small" aria-label="保護者メニュー">ほごしゃ</button>
+        <button id="rewardsBtn" class="btn ghost big">ごほうび</button>
+        <button id="parentBtn" class="btn ghost small">ほごしゃ</button>
       </div>
 
-      <!-- 出題設定（下部配置） -->
-      <section class="card settings-card" aria-label="出題設定">
-        <h2 class="card-title">出題設定</h2>
-
-        <div class="field">
-          <label class="block">通番の範囲（<span id="rangeMinMax">-</span>）
-            <div class="row wrap">
-              <input id="rangeStart" type="number" class="num" aria-label="通番開始" />
-              <span>〜</span>
-              <input id="rangeEnd" type="number" class="num" aria-label="通番終了" />
-            </div>
-          </label>
-          <p class="hint">※ CSVの「通番」列を使います</p>
-        </div>
-
-        <div class="field">
-          <label class="block">品詞（複数えらべます）</label>
-          <div id="posFilter" class="chips" role="group" aria-label="品詞フィルタ">
-            <!-- CSV読込後に自動生成（既定で全選択） -->
-          </div>
-          <p class="hint">未選択の場合は自動で「全品詞」として扱います</p>
-        </div>
-
-        <p id="startError" class="error" aria-live="polite" hidden></p>
-      </section>
-
-      <!-- 英語音声の選択（TOPで選べる） -->
+      <!-- 英語音声選択 -->
       <section class="card voice-card" aria-label="えいご の おんせい">
         <h2 class="card-title">えいご の おんせい</h2>
         <div class="row wrap">
           <label class="block">
-          えらぶ：
-            <select id="voiceSelect" class="voice-select" aria-label="英語 音声をえらんでね">
-              <!-- app.js で自動生成（Siri等の自然音声を優先） -->
-            </select>
+            えらぶ：
+            <select id="voiceSelect" class="voice-select" aria-label="英語 音声をえらんでね"></select>
           </label>
-          <button id="voiceTestBtn" class="btn ghost small" aria-label="テストさいせい">テスト再生</button>
+          <button id="voiceTestBtn" class="btn ghost small">テスト再生</button>
         </div>
-        <p class="hint">※ おんせいのリストは すこし まってから ひょうじされます（iOSでは時間がかかることがあります）</p>
+        <p class="hint">※ おんせいのリストは すこし まってから ひょうじされます</p>
       </section>
-      
+
+      <!-- 出題設定 -->
+      <section class="card settings-card" aria-label="出題設定">
+        <h2 class="card-title">出題設定</h2>
+        <div class="field">
+          <label class="block">通番の範囲（<span id="rangeMinMax">-</span>）
+            <div class="row wrap">
+              <input id="rangeStart" type="number" class="num" />
+              <span>〜</span>
+              <input id="rangeEnd" type="number" class="num" />
+            </div>
+          </label>
+        </div>
+        <div class="field">
+          <label class="block">品詞（複数えらべます）</label>
+          <div id="posFilter" class="chips"></div>
+        </div>
+        <p id="startError" class="error" hidden></p>
+      </section>
+
       <p id="homeHint" class="hint">※ はじめは サンプルのことば（sample.csv）を つかいます</p>
     </section>
 
-    <!-- クイズ（4択のみ） -->
-    <section id="quiz" class="screen" aria-label="クイズ">
+    <!-- クイズ -->
+    <section id="quiz" class="screen">
       <div class="quiz-head">
         <span id="quizWord" class="quiz-word">apple</span>
-        <button id="quizReplayBtn" class="btn round" aria-label="もういちどきく">🔊</button>
+        <button id="quizReplayBtn" class="btn round">🔊</button>
       </div>
-      <div id="choices" class="grid-2x2" role="group" aria-label="えらんでね"></div>
-      <div id="progress" class="progress" aria-live="polite">0 / 5</div>
+      <div id="choices" class="grid-2x2"></div>
+      <div id="progress" class="progress">0 / 5</div>
     </section>
 
-    <!-- ごほうび（セッション終了時） -->
-    <section id="reward" class="screen" aria-label="ごほうび">
+    <!-- ごほうび -->
+    <section id="reward" class="screen">
       <p class="big">やったね！</p>
-      <div id="stickerSpot" class="sticker" aria-hidden="true"></div>
+      <div id="stickerSpot" class="sticker"></div>
       <div class="row">
         <button id="nextRoundBtn" class="btn primary">つづける</button>
         <button id="toHomeBtn" class="btn ghost">おわる</button>
       </div>
     </section>
 
-    <!-- ごほうび一覧（直近30日） -->
-    <section id="rewards" class="screen" aria-label="ごほうび一覧">
+    <!-- ごほうび一覧 -->
+    <section id="rewards" class="screen">
       <h2 class="brand">ごほうび</h2>
       <p class="hint">直近30日分を ひょうじします</p>
-      <div id="rewardsList" class="rewards-list" aria-live="polite"></div>
+      <div id="rewardsList" class="rewards-list"></div>
       <div class="row">
         <button id="rewardsBackBtn" class="btn ghost">もどる</button>
       </div>
     </section>
 
     <!-- 保護者 -->
-    <section id="parent" class="screen" aria-label="保護者メニュー">
+    <section id="parent" class="screen">
       <h2>保護者メニュー</h2>
-
       <div id="parentGate" class="card">
-        <p>ボタンを <strong>3 びょう</strong> おしてから、<strong>1 + 2</strong> を いれてください。</p>
+        <p>ボタンを3びょう おしてから、1+2 をいれてください。</p>
         <div class="row">
           <button id="holdButton" class="btn">ながおし</button>
-          <input id="gateAnswer" type="number" inputmode="numeric" placeholder="答え" aria-label="答え" />
+          <input id="gateAnswer" type="number" />
           <button id="enterParent" class="btn">ひらく</button>
         </div>
       </div>
-
       <div id="parentPanel" class="card" hidden>
-        <div class="field">
-          <label class="file">
-            CSV をよみこむ
-            <input id="csvInput" type="file" accept=".csv" />
-          </label>
-          <p class="hint">CSV ヘッダー：<code>通番,英単語,日本語訳,品詞</code></p>
-        </div>
-
+        <label class="file">
+          CSV をよみこむ
+          <input id="csvInput" type="file" accept=".csv" />
+        </label>
         <div class="row wrap">
           <label>1かいの もんだいすう
             <select id="sessionSize">
-              <option value="5" selected>5</option>
+              <option value="5">5</option>
               <option value="10">10</option>
             </select>
           </label>
-          <label>TTSことば
-            <select id="ttsLang">
-              <option value="en-US" selected>en-US</option>
-              <option value="en-GB">en-GB</option>
-            </select>
-          </label>
-          <label>はやさ <input id="ttsRate" type="range" min="0.7" max="1.1" step="0.05" value="0.95"/></label>
-          <label>ピッチ <input id="ttsPitch" type="range" min="0.8" max="1.2" step="0.05" value="1.05"/></label>
         </div>
-
-        <div class="row">
-          <button id="resetProgress" class="btn warn">しんちょくリセット</button>
-          <button id="backHome" class="btn ghost">もどる</button>
-        </div>
-
-        <details>
-          <summary>かいはつしゃログ</summary>
-          <pre id="devLog"></pre>
-        </details>
+        <button id="resetProgress" class="btn warn">しんちょくリセット</button>
+        <button id="backHome" class="btn ghost">もどる</button>
+        <details><summary>ログ</summary><pre id="devLog"></pre></details>
       </div>
     </section>
   </main>
 
-  <!-- 〇/× の大きな表示 -->
-  <div id="markOverlay" class="mark-overlay" aria-hidden="true"></div>
+  <div id="markOverlay" class="mark-overlay"></div>
+  <canvas id="confetti" class="confetti-canvas"></canvas>
 
-  <!-- 紙吹雪キャンバス（下部噴水・豪華版） -->
-  <canvas id="confetti" class="confetti-canvas" aria-hidden="true"></canvas>
-
-  <!-- app -->
-  <script src="app.js"></script>
+  <script src="./app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js');
+      });
+    }
+  </script>
 </body>
 </html>
