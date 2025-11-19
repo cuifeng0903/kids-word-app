@@ -157,28 +157,79 @@ function speakWithSelectedVoice(text) {
   if (state.tts.voice) u.voice = state.tts.voice;
   speechSynthesis.cancel();
   speechSynthesis.speak(u);
+  
 // =====================
-//  英→日シーケンス（選択音声適用）
+//  英→日シーケンス（安全版 / タイムアウト付き）
 // =====================
-function speakSequenceEnJa(word, japanese) {
-  return new Promise(resolve => {
-    const u1 = new SpeechSynthesisUtterance(word);
-    u1.lang = state.tts.lang;
-    u1.rate = state.tts.rate;
-    u1.pitch = state.tts.pitch;
-    u1.volume = state.tts.volume;
-    if (state.tts.voice) u1.voice = state.tts.voice;
+function speakSequenceEnJaSafe(word, japanese, opts = {}) {
+  const { maxMs = 3000 } = opts;
 
-    const u2 = new SpeechSynthesisUtterance(japanese);
-    u2.lang = 'ja-JP'; u2.rate=0.95; u2.pitch=1.05; u2.volume=0.8;
+  return new Promise((resolve) => {
+    try {
+      // 直前の発話を明示キャンセル（iOSのイベント取りこぼし対策）
+      speechSynthesis.cancel();
 
-    u1.onend = ()=>speechSynthesis.speak(u2);
-    u2.onend = resolve;
-    speechSynthesis.cancel();
-    speechSynthesis.speak(u1);
+      // 英語（選択音声を適用）
+      const u1 = new SpeechSynthesisUtterance(word);
+      u1.lang = state.tts.lang || 'en-US';
+      u1.rate = state.tts.rate;
+      u1.pitch = state.tts.pitch;
+      u1.volume = state.tts.volume;
+      if (state.tts.voice && /^en(-|_)/i.test(state.tts.voice.lang)) {
+        u1.voice = state.tts.voice;
+      }
+
+      // 日本語
+      const u2 = new SpeechSynthesisUtterance(japanese);
+      u2.lang = 'ja-JP';
+      u2.rate = 0.95;
+      u2.pitch = 1.05;
+      u2.volume = 0.8;
+
+      // タイムアウト（両方の終了を待つが、maxMsで強制resolve）
+      const timer = setTimeout(() => {
+        logDev('TTSタイムアウトで続行します');
+        resolve('timeout');
+      }, maxMs);
+
+      // 英語が終わったら日本語へ
+      u1.onend = () => {
+        try {
+          speechSynthesis.speak(u2);
+        } catch (e) {
+          logDev('日本語TTS開始時エラー: ' + (e?.message || e));
+          clearTimeout(timer);
+          resolve('error');
+        }
+      };
+
+      // どちらかのエラーでも次へ進める
+      u1.onerror = (e) => {
+        logDev('英語TTSエラー: ' + (e?.error || 'unknown'));
+        clearTimeout(timer);
+        resolve('error');
+      };
+      u2.onerror = (e) => {
+        logDev('日本語TTSエラー: ' + (e?.error || 'unknown'));
+        clearTimeout(timer);
+        resolve('error');
+      };
+
+      // 日本語の終了で完了
+      u2.onend = () => {
+        clearTimeout(timer);
+        resolve('ok');
+      };
+
+      // 開始（英語→日本語）
+      speechSynthesis.speak(u1);
+
+    } catch (e) {
+      logDev('TTSシーケンス例外: ' + (e?.message || e));
+      resolve('exception');
+    }
   });
 }
-
 // =====================
 //  フィルタ適用
 // =====================
@@ -239,29 +290,43 @@ function renderQuiz(options){
 // =====================
 //  正誤処理
 // =====================
-function onChoice(opt,el){
-  if(opt.isCorrect){
+function onChoice(opt, el) {
+  if (opt.isCorrect) {
     showMark('ok');
-    Promise.all([speakSequenceEnJa(state.current.word,state.current.japanese),confettiFountain()])
-    .then(()=>{
+
+    // 紙吹雪とTTSを同時開始し、どちらも完了（orタイムアウト）したら次へ
+    Promise.allSettled([
+      speakSequenceEnJaSafe(state.current.word, state.current.japanese, { maxMs: 3000 }),
+      confettiFountain({ duration: 1500, count: 300 })
+    ]).then((results) => {
+      // ログ（原因調査用）
+      logDev('正答：完了結果 ' + JSON.stringify(results.map(r => r.value || r.status)));
+
       hideMark();
       state.progressCount++;
       saveSticker(state.current.seq);
-      if(state.progressCount>=state.sessionSize){
-        const icon=showRewardIcon();addRewardHistory(icon);
+      state.missCountForCurrent = 0;
+
+      if (state.progressCount >= state.sessionSize) {
+        const icon = showRewardIcon();
+        addRewardHistory(icon);
         show('reward');
-      }else nextRound();
+      } else {
+        nextRound();  // ← TTS・紙吹雪の「完了またはタイムアウト」直後に確実に開始
+      }
     });
-  }else{
-    showMark('ng');setTimeout(hideMark,600);
+
+  } else {
+    showMark('ng');
+    setTimeout(hideMark, 600);
     el.classList.add('shake');
     state.missCountForCurrent++;
-    if(state.missCountForCurrent>=2){
-      [...document.querySelectorAll('#choices .choice')].forEach(b=>{
-        if(b.textContent===state.current.japanese)b.classList.add('glow');
+    if (state.missCountForCurrent >= 2) {
+      [...document.querySelectorAll('#choices .choice')].forEach(btn => {
+        if (btn.textContent === state.current.japanese) btn.classList.add('glow');
       });
     }
-    setTimeout(()=>el.classList.remove('shake'),320);
+    setTimeout(() => el.classList.remove('shake'), 320);
   }
 }
 
