@@ -61,6 +61,21 @@
         <p id="startError" class="error" aria-live="polite" hidden></p>
       </section>
 
+      <!-- 英語音声の選択（TOPで選べる） -->
+      <section class="card voice-card" aria-label="えいご の おんせい">
+        <h2 class="card-title">えいご の おんせい</h2>
+        <div class="row wrap">
+          <label class="block">
+          えらぶ：
+            <select id="voiceSelect" class="voice-select" aria-label="英語 音声をえらんでね">
+              <!-- app.js で自動生成（Siri等の自然音声を優先） -->
+            </select>
+          </label>
+          <button id="voiceTestBtn" class="btn ghost small" aria-label="テストさいせい">テスト再生</button>
+        </div>
+        <p class="hint">※ おんせいのリストは すこし まってから ひょうじされます（iOSでは時間がかかることがあります）</p>
+      </section>
+      
       <p id="homeHint" class="hint">※ はじめは サンプルのことば（sample.csv）を つかいます</p>
     </section>
 
