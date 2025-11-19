@@ -114,3 +114,6 @@ html,body { margin:0; background:var(--bg); color:var(--text); font-family: syst
   75%{ transform:translateX(6px); }
 }
 .glow { box-shadow:0 0 0 4px rgba(76,175,239,.4); }
+
+.voice-card { margin-top: 8px; }
+.voice-select { font-size: 20px; padding: 10px 12px; min-width: 280px; }
