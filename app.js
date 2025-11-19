@@ -719,5 +719,161 @@ if ('serviceWorker' in navigator) {
       .catch(err => console.error('SW registration failed:', err));
   });
 }
+
+// =====================
+//  TOPの英語音声選択（getVoices）
+// =====================
+const VOICE_STORAGE_KEY = 'tts.en.voiceName';
+
+function initVoiceSelect() {
+  const sel = document.getElementById('voiceSelect');
+  const testBtn = document.getElementById('voiceTestBtn');
+  if (!sel || !testBtn) return;
+
+  // 既存設定の復元
+  const savedName = localStorage.getItem(VOICE_STORAGE_KEY);
+
+  // 音声一覧を構築
+  const buildOptions = () => {
+    const voices = speechSynthesis.getVoices() || [];
+    // 英語系を抽出（en-*）。Siri/自然音声っぽい名前を優先的に上に
+    const enVoices = voices
+      .filter(v => /^en(-|_)/i.test(v.lang))
+      .sort((a, b) => {
+        const as = scoreVoice(a), bs = scoreVoice(b);
+        if (as !== bs) return bs - as;
+        return (a.name || '').localeCompare(b.name || '');
+      });
+
+    sel.innerHTML = '';
+    if (!enVoices.length) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = '（英語の音声が みつかりません）';
+      sel.appendChild(opt);
+      sel.disabled = true;
+      testBtn.disabled = true;
+      return;
+    }
+
+    sel.disabled = false;
+    testBtn.disabled = false;
+
+    enVoices.forEach(v => {
+      const opt = document.createElement('option');
+      opt.value = v.name;
+      opt.textContent = `${v.name} (${v.lang})`;
+      sel.appendChild(opt);
+    });
+
+    // 保存済みの音声を選択 or 先頭を既定
+    const defaultIndex = enVoices.findIndex(v => v.name === savedName);
+    sel.selectedIndex = (defaultIndex >= 0) ? defaultIndex : 0;
+
+    // 状態へ反映
+    const chosen = enVoices[sel.selectedIndex];
+    state.tts.voice = chosen || null;
+    localStorage.setItem(VOICE_STORAGE_KEY, chosen?.name || '');
+  };
+
+  // 音声リストの「自然音声」優先度付け（簡易スコア）
+  function scoreVoice(v) {
+    const name = (v.name || '').toLowerCase();
+    let s = 0;
+    if (/siri/.test(name)) s += 5;         // iOS Siri系（自然）
+    if (/enhanced|premium|natural/.test(name)) s += 3;  // 強化音声
+    if (/en-us/.test((v.lang||'').toLowerCase())) s += 2; // en-USを少し優先
+    return s;
+  }
+
+  // 変更ハンドラ
+  sel.addEventListener('change', () => {
+    const voices = speechSynthesis.getVoices() || [];
+    const picked = voices.find(v => v.name === sel.value);
+    state.tts.voice = picked || null;
+    localStorage.setItem(VOICE_STORAGE_KEY, picked?.name || '');
+  });
+
+  // テスト再生：「Hello! Nice to meet you!」
+  testBtn.addEventListener('click', () => {
+    const text = 'Hello! Nice to meet you!';
+    speakWithSelectedVoice(text);
+  });
+
+  // iOS対策：イベント＋一定間隔でリトライ
+  let retries = 0;
+  const maxRetries = 10; // 約5秒（500ms * 10）
+  const tryBuild = () => {
+    buildOptions();
+    if ((speechSynthesis.getVoices() || []).length === 0 && retries < maxRetries) {
+      retries++;
+      setTimeout(tryBuild, 500);
+    }
+  };
+
+  // 主要イベント
+  window.speechSynthesis.onvoiceschanged = () => buildOptions();
+  // 初期呼び出し
+  tryBuild();
+}
+
+// 選択した音声を使って話す（英語のみ）
+function speakWithSelectedVoice(text) {
+  try {
+    const u = new SpeechSynthesisUtterance(text);
+    // 既存の英語設定を踏襲
+    u.lang = state.tts.lang || 'en-US';
+    u.rate = state.tts.rate;
+    u.pitch = state.tts.pitch;
+    u.volume = state.tts.volume;
+
+    // 選択音声を適用
+    if (state.tts.voice && /^en(-|_)/i.test(state.tts.voice.lang)) {
+      u.voice = state.tts.voice;
+    }
+    speechSynthesis.cancel();
+    speechSynthesis.speak(u);
+  } catch (e) {
+    logDev(`TTSテスト再生エラー: ${e?.message || e}`);
+  }
+}
+
+// 既存の英→日シーケンスを選択音声で上書き（英語側のみ）
+function speakSequenceEnJa(word, japanese) {
+  return new Promise(resolve => {
+    try {
+      const u1 = new SpeechSynthesisUtterance(word);
+      u1.lang = state.tts.lang || 'en-US';
+      u1.rate = state.tts.rate;
+      u1.pitch = state.tts.pitch;
+      u1.volume = state.tts.volume;
+      if (state.tts.voice && /^en(-|_)/i.test(state.tts.voice.lang)) {
+        u1.voice = state.tts.voice;
+      }
+
+      const u2 = new SpeechSynthesisUtterance(japanese);
+      u2.lang = 'ja-JP';
+      u2.rate = 0.95;
+      u2.pitch = 1.05;
+      u2.volume = 0.8;
+
+      u1.onend = () => speechSynthesis.speak(u2);
+      u2.onend = resolve;
+      u1.onerror = () => { logDev('TTS英語エラー'); resolve(); };
+      u2.onerror = () => { logDev('TTS日本語エラー'); resolve(); };
+
+      speechSynthesis.cancel();
+      speechSynthesis.speak(u1);
+    } catch (e) {
+      logDev(`TTSシーケンス例外: ${e?.message || e}`);
+      resolve();
+    }
+  });
+}
+
+// 初期化フックに追加（DOMContentLoaded内）
+window.addEventListener('DOMContentLoaded', () => {
+  initVoiceSelect();  // ← 追加
+});  
   
 });
