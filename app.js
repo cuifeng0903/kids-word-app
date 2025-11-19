@@ -1,5 +1,5 @@
 // =====================
-//  状態
+//  状態管理
 // =====================
 const state = {
   entries: [],       // { seq:number, word, japanese, pos }
@@ -8,61 +8,41 @@ const state = {
   sessionSize: 5,
   progressCount: 0,
   lastSeenIds: [],
-  tts: { lang: 'en-US', rate: 0.95, pitch: 1.05, volume: 0.7 },
+  tts: { lang: 'en-US', rate: 0.95, pitch: 1.05, volume: 0.7, voice: null },
   missCountForCurrent: 0,
   dataset: { minSeq: null, maxSeq: null, posSet: new Set() },
   filters: { start: null, end: null, posSelected: new Set() },
 };
 
-// 画面切替
-const screens = ['home', 'quiz', 'reward', 'rewards', 'parent'];
-function show(id) {
-  screens.forEach(s => document.getElementById(s).classList.remove('active'));
-  document.getElementById(id).classList.add('active');
-}
-
 // =====================
-//  CSV 読み込み・検証（日本語ヘッダー）
+//  CSV読み込み・検証
 // =====================
 function parseCsv(text) {
-  const lines = text.split(/\r?\n/);
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
   if (!lines.length) return [];
-
-  // 先頭の空行はスキップ
-  while (lines.length && !lines[0].trim()) lines.shift();
-  if (!lines.length) return [];
-
   const header = splitCsvLine(lines[0]).map(h => h.trim());
 
-  const idxSeq  = findHeader(header, ['通番','seq','番号','id','index']);
-  const idxWord = findHeader(header, ['英単語','word','単語']);
-  const idxJa   = findHeader(header, ['日本語訳','japanese','訳','和訳']);
-  const idxPos  = findHeader(header, ['品詞','pos']);
+  const idxSeq = findHeader(header, ['通番','seq','番号','id']);
+  const idxWord = findHeader(header, ['英単語','word']);
+  const idxJa = findHeader(header, ['日本語訳','japanese']);
+  const idxPos = findHeader(header, ['品詞','pos']);
 
   if (idxSeq < 0 || idxWord < 0 || idxJa < 0 || idxPos < 0) {
-    logDev('ヘッダーが不正です。必要: 通番,英単語,日本語訳,品詞（旧: word,japanese,pos も可）');
+    logDev('ヘッダーが不正です');
     return [];
   }
 
   const out = [];
-  const invalids = [];
   for (let i = 1; i < lines.length; i++) {
-    const raw = lines[i];
-    if (!raw || !raw.trim()) continue;
-    const cols = splitCsvLine(raw);
-    const seq  = Number((cols[idxSeq] || '').trim());
+    const cols = splitCsvLine(lines[i]);
+    const seq = Number((cols[idxSeq] || '').trim());
     const word = (cols[idxWord] || '').trim();
-    const jap  = (cols[idxJa] || '').trim();
-    const pos  = (cols[idxPos] || '').trim();
-
-    if (!Number.isFinite(seq) || !word || !jap || !pos) {
-      invalids.push(i+1); continue;
-    }
+    const jap = (cols[idxJa] || '').trim();
+    const pos = (cols[idxPos] || '').trim();
+    if (!Number.isFinite(seq) || !word || !jap || !pos) continue;
     out.push({ seq, word, japanese: jap, pos });
   }
-  if (invalids.length) logDev(`${invalids.length} 行スキップ: 行 ${invalids.join(', ')}`);
 
-  // データセット情報
   if (out.length) {
     const seqs = out.map(e => e.seq);
     state.dataset.minSeq = Math.min(...seqs);
@@ -71,15 +51,16 @@ function parseCsv(text) {
   }
   return out;
 }
+
 function findHeader(arr, candidates) {
   const lower = arr.map(s => s.toLowerCase());
   for (const cand of candidates) {
-    const i = lower.indexOf(String(cand).toLowerCase());
+    const i = lower.indexOf(cand.toLowerCase());
     if (i >= 0) return i;
   }
   return -1;
 }
-// CSV 1行パース（引用符対応の軽量版）
+
 function splitCsvLine(line) {
   const result = [];
   let cur = '', inQuotes = false;
@@ -99,455 +80,258 @@ function splitCsvLine(line) {
 }
 
 // =====================
-//  TTS（英→日 連続 / Promise を返す）
+//  音声選択（TOP UI）
 // =====================
-function speakWord(text) {
-  try {
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = state.tts.lang;
-    u.rate = state.tts.rate;
-    u.pitch = state.tts.pitch;
-    u.volume = state.tts.volume;
-    speechSynthesis.cancel();
-    speechSynthesis.speak(u);
-  } catch (e) { logDev(`TTSエラー: ${e?.message || e}`); }
+const VOICE_STORAGE_KEY = 'tts.en.voiceName';
+
+function initVoiceSelect() {
+  const sel = document.getElementById('voiceSelect');
+  const testBtn = document.getElementById('voiceTestBtn');
+  if (!sel || !testBtn) return;
+
+  const savedName = localStorage.getItem(VOICE_STORAGE_KEY);
+
+  const buildOptions = () => {
+    const voices = speechSynthesis.getVoices() || [];
+    const enVoices = voices.filter(v => /^en(-|_)/i.test(v.lang))
+      .sort((a,b) => scoreVoice(b) - scoreVoice(a));
+
+    sel.innerHTML = '';
+    if (!enVoices.length) {
+      sel.innerHTML = '<option>（英語音声なし）</option>';
+      sel.disabled = true; testBtn.disabled = true;
+      return;
+    }
+
+    sel.disabled = false; testBtn.disabled = false;
+    enVoices.forEach(v => {
+      const opt = document.createElement('option');
+      opt.value = v.name;
+      opt.textContent = `${v.name} (${v.lang})`;
+      sel.appendChild(opt);
+    });
+
+    const idx = enVoices.findIndex(v => v.name === savedName);
+    sel.selectedIndex = (idx >= 0) ? idx : 0;
+    state.tts.voice = enVoices[sel.selectedIndex];
+    localStorage.setItem(VOICE_STORAGE_KEY, state.tts.voice.name);
+  };
+
+  function scoreVoice(v) {
+    const name = (v.name||'').toLowerCase();
+    let s = 0;
+    if (/siri/.test(name)) s+=5;
+    if (/enhanced|premium|natural/.test(name)) s+=3;
+    if (/en-us/.test((v.lang||'').toLowerCase())) s+=2;
+    return s;
+  }
+
+  sel.addEventListener('change', () => {
+    const voices = speechSynthesis.getVoices() || [];
+    const picked = voices.find(v => v.name === sel.value);
+    state.tts.voice = picked || null;
+    localStorage.setItem(VOICE_STORAGE_KEY, picked?.name || '');
+  });
+
+  testBtn.addEventListener('click', () => {
+    speakWithSelectedVoice('Hello! Nice to meet you!');
+  });
+
+  let retries = 0;
+  const tryBuild = () => {
+    buildOptions();
+    if ((speechSynthesis.getVoices()||[]).length===0 && retries<10) {
+      retries++; setTimeout(tryBuild,500);
+    }
+  };
+  window.speechSynthesis.onvoiceschanged = buildOptions;
+  tryBuild();
 }
+
+function speakWithSelectedVoice(text) {
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = state.tts.lang;
+  u.rate = state.tts.rate;
+  u.pitch = state.tts.pitch;
+  u.volume = state.tts.volume;
+  if (state.tts.voice) u.voice = state.tts.voice;
+  speechSynthesis.cancel();
+  speechSynthesis.speak(u);
+// =====================
+//  英→日シーケンス（選択音声適用）
+// =====================
 function speakSequenceEnJa(word, japanese) {
   return new Promise(resolve => {
-    try {
-      const u1 = new SpeechSynthesisUtterance(word);
-      u1.lang = state.tts.lang || 'en-US';
-      u1.rate = state.tts.rate;
-      u1.pitch = state.tts.pitch;
-      u1.volume = state.tts.volume;
+    const u1 = new SpeechSynthesisUtterance(word);
+    u1.lang = state.tts.lang;
+    u1.rate = state.tts.rate;
+    u1.pitch = state.tts.pitch;
+    u1.volume = state.tts.volume;
+    if (state.tts.voice) u1.voice = state.tts.voice;
 
-      const u2 = new SpeechSynthesisUtterance(japanese);
-      u2.lang = 'ja-JP';
-      u2.rate = 0.95;
-      u2.pitch = 1.05;
-      u2.volume = 0.8;
+    const u2 = new SpeechSynthesisUtterance(japanese);
+    u2.lang = 'ja-JP'; u2.rate=0.95; u2.pitch=1.05; u2.volume=0.8;
 
-      u1.onend = () => speechSynthesis.speak(u2);
-      u2.onend = resolve;
-      u1.onerror = ()=>{ logDev('TTS英語エラー'); resolve(); };
-      u2.onerror = ()=>{ logDev('TTS日本語エラー'); resolve(); };
-
-      speechSynthesis.cancel();
-      speechSynthesis.speak(u1);
-    } catch (e) {
-      logDev(`TTSシーケンス例外: ${e?.message || e}`);
-      resolve();
-    }
+    u1.onend = ()=>speechSynthesis.speak(u2);
+    u2.onend = resolve;
+    speechSynthesis.cancel();
+    speechSynthesis.speak(u1);
   });
 }
 
 // =====================
-//  フィルタ適用（通番・品詞）
+//  フィルタ適用
 // =====================
 function applyFilters() {
-  const { start, end, posSelected } = state.filters;
-  const startNum = Number.isFinite(start) ? start : state.dataset.minSeq;
-  const endNum   = Number.isFinite(end)   ? end   : state.dataset.maxSeq;
-  const posSet   = (posSelected && posSelected.size) ? posSelected : state.dataset.posSet;
-
-  state.filtered = state.entries.filter(e =>
-    e.seq >= startNum && e.seq <= endNum && posSet.has(e.pos)
-  );
+  const { start,end,posSelected } = state.filters;
+  const s = Number.isFinite(start)?start:state.dataset.minSeq;
+  const e = Number.isFinite(end)?end:state.dataset.maxSeq;
+  const posSet = posSelected.size?posSelected:state.dataset.posSet;
+  state.filtered = state.entries.filter(e2=>e2.seq>=s && e2.seq<=e && posSet.has(e2.pos));
 }
 
 // =====================
-//  出題選定・4択構築
+//  出題ロジック
 // =====================
 function pickNext() {
   if (!state.filtered.length) return null;
-
-  // 最近の重複回避
-  const recentIds = new Set(state.lastSeenIds);
-  const pool = state.filtered.filter(e => !recentIds.has(e.seq));
-  const base = pool.length ? pool : state.filtered;
-
-  const choice = base[Math.floor(Math.random() * base.length)];
+  const pool = state.filtered.filter(e=>!state.lastSeenIds.includes(e.seq));
+  const base = pool.length?pool:state.filtered;
+  const choice = base[Math.floor(Math.random()*base.length)];
   state.lastSeenIds.unshift(choice.seq);
-  state.lastSeenIds = [...new Set(state.lastSeenIds)].slice(0, 10);
+  state.lastSeenIds = [...new Set(state.lastSeenIds)].slice(0,10);
   return choice;
 }
+
 function buildQuizOptions(target) {
   const entries = state.filtered;
-  const samePOS = entries.filter(e => e.pos === target.pos && e.seq !== target.seq);
-  const others  = entries.filter(e => e.pos !== target.pos && e.seq !== target.seq);
-
-  const distractors = [];
-  while (distractors.length < 3 && samePOS.length) distractors.push(pickAndRemoveRandom(samePOS));
-  while (distractors.length < 3 && others.length)  distractors.push(pickAndRemoveRandom(others));
-
-  // 4択不足の安全補完
-  if (distractors.length < 3) {
-    const rest = entries.filter(e => e.seq !== target.seq && !distractors.includes(e));
-    while (distractors.length < 3 && rest.length) distractors.push(pickAndRemoveRandom(rest));
+  const samePOS = entries.filter(e=>e.pos===target.pos && e.seq!==target.seq);
+  const others = entries.filter(e=>e.pos!==target.pos && e.seq!==target.seq);
+  const distractors=[];
+  while(distractors.length<3 && samePOS.length)distractors.push(pickAndRemoveRandom(samePOS));
+  while(distractors.length<3 && others.length)distractors.push(pickAndRemoveRandom(others));
+  if(distractors.length<3){
+    const rest=entries.filter(e=>e.seq!==target.seq && !distractors.includes(e));
+    while(distractors.length<3 && rest.length)distractors.push(pickAndRemoveRandom(rest));
   }
-
-  const options = shuffle([{ ...target, isCorrect:true }, ...distractors.map(d => ({...d, isCorrect:false}))])
-    .map(e => ({ id:e.seq, label:e.japanese, isCorrect:!!e.isCorrect }));
-  return options;
+  return shuffle([{...target,isCorrect:true},...distractors.map(d=>({...d,isCorrect:false}))])
+    .map(e=>({id:e.seq,label:e.japanese,isCorrect:e.isCorrect}));
 }
-function pickAndRemoveRandom(arr){ const i = Math.floor(Math.random()*arr.length); return arr.splice(i,1)[0]; }
-function shuffle(arr){ for(let i=arr.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]];} return arr; }
+
+function pickAndRemoveRandom(arr){const i=Math.floor(Math.random()*arr.length);return arr.splice(i,1)[0];}
+function shuffle(arr){for(let i=arr.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]];}return arr;}
 
 // =====================
-//  レンダリング（クイズ）
+//  UIレンダリング
 // =====================
-function renderQuiz(options) {
-  document.getElementById('quizWord').textContent = state.current.word;
-  const container = document.getElementById('choices');
-  container.innerHTML = '';
-  options.forEach(opt => {
-    const btn = document.createElement('button');
-    btn.className = 'choice';
-    btn.textContent = opt.label;
-    btn.onclick = () => onChoice(opt, btn);
-    container.appendChild(btn);
+function renderQuiz(options){
+  document.getElementById('quizWord').textContent=state.current.word;
+  const c=document.getElementById('choices');c.innerHTML='';
+  options.forEach(opt=>{
+    const btn=document.createElement('button');
+    btn.className='choice';btn.textContent=opt.label;
+    btn.onclick=()=>onChoice(opt,btn);
+    c.appendChild(btn);
   });
-  document.getElementById('progress').textContent = `${state.progressCount} / ${state.sessionSize}`;
+  document.getElementById('progress').textContent=`${state.progressCount} / ${state.sessionSize}`;
 }
 
 // =====================
 //  正誤処理
-//  - 正答：〇（赤）＋豪華紙吹雪、英→日のTTS完了を待ってから次へ
-//  - 誤答：×（青）、リトライ可（2回目ミスで淡いヒント）
 // =====================
-function onChoice(opt, el) {
-  if (opt.isCorrect) {
-    showMark('ok'); // 〇
-
-    // 英→日読み上げ と 豪華紙吹雪 を同時開始し、両完了後に遷移
-    Promise.all([
-      speakSequenceEnJa(state.current.word, state.current.japanese),
-      confettiFountain({ duration: 1700, count: 360, emitters: 3, sparkles: true })
-    ]).then(() => {
+function onChoice(opt,el){
+  if(opt.isCorrect){
+    showMark('ok');
+    Promise.all([speakSequenceEnJa(state.current.word,state.current.japanese),confettiFountain()])
+    .then(()=>{
       hideMark();
       state.progressCount++;
       saveSticker(state.current.seq);
-      state.missCountForCurrent = 0;
-
-      if (state.progressCount >= state.sessionSize) {
-        const icon = showRewardIcon();     // 表示
-        addRewardHistory(icon);            // 履歴に保存（当日分として）
+      if(state.progressCount>=state.sessionSize){
+        const icon=showRewardIcon();addRewardHistory(icon);
         show('reward');
-      } else {
-        nextRound(); // TTS日本語完了＆紙吹雪完了のあとで遷移
-      }
+      }else nextRound();
     });
-  } else {
-    showMark('ng'); // ×
-    setTimeout(hideMark, 600);
-
+  }else{
+    showMark('ng');setTimeout(hideMark,600);
     el.classList.add('shake');
     state.missCountForCurrent++;
-    if (state.missCountForCurrent >= 2) {
-      // さりげなく正解ボタンにグロー（日本語ラベル一致）
-      [...document.querySelectorAll('#choices .choice')].forEach(btn => {
-        if (btn.textContent === state.current.japanese) btn.classList.add('glow');
+    if(state.missCountForCurrent>=2){
+      [...document.querySelectorAll('#choices .choice')].forEach(b=>{
+        if(b.textContent===state.current.japanese)b.classList.add('glow');
       });
     }
-    setTimeout(() => el.classList.remove('shake'), 320);
+    setTimeout(()=>el.classList.remove('shake'),320);
   }
 }
 
 // =====================
-//  〇/× 表示
+//  マーク表示
 // =====================
-function showMark(kind /* 'ok' | 'ng' */) {
-  const el = document.getElementById('markOverlay');
-  el.className = `mark-overlay show ${kind === 'ok' ? 'mark--ok' : 'mark--ng'}`;
-  el.textContent = (kind === 'ok') ? '〇' : '×';
+function showMark(kind){
+  const el=document.getElementById('markOverlay');
+  el.className=`mark-overlay show ${kind==='ok'?'mark--ok':'mark--ng'}`;
+  el.textContent=(kind==='ok')?'〇':'×';
 }
-function hideMark() {
-  const el = document.getElementById('markOverlay');
-  el.classList.remove('show','mark--ok','mark--ng');
-  el.textContent = '';
+function hideMark(){
+  const el=document.getElementById('markOverlay');
+  el.classList.remove('show','mark--ok','mark--ng');el.textContent='';
 }
 
 // =====================
-//  紙吹雪（下部噴水・豪華版）
+//  紙吹雪
 // =====================
-function confettiFountain({ duration = 1600, count = 320, emitters = 3, sparkles = true } = {}) {
-  const canvas = document.getElementById('confetti');
-  if (!canvas) return Promise.resolve();
-
-  const dpr = window.devicePixelRatio || 1;
-  const rect = canvas.getBoundingClientRect();
-  canvas.width = rect.width * dpr;
-  canvas.height = rect.height * dpr;
-
-  const ctx = canvas.getContext('2d');
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.scale(dpr, dpr);
-
-  const W = rect.width;
-  const H = rect.height;
-
-  const emitOrigins = [];
-  if (emitters === 1) {
-    emitOrigins.push({ x: W/2, y: H-6 });
-  } else if (emitters === 2) {
-    emitOrigins.push({ x: W*0.35, y: H-6 }, { x: W*0.65, y: H-6 });
-  } else {
-    emitOrigins.push({ x: W*0.25, y: H-6 }, { x: W*0.5, y: H-6 }, { x: W*0.75, y: H-6 });
+function confettiFountain({duration=1500,count=300}={}){
+  const canvas=document.getElementById('confetti');if(!canvas)return Promise.resolve();
+  const dpr=window.devicePixelRatio||1;const rect=canvas.getBoundingClientRect();
+  canvas.width=rect.width*dpr;canvas.height=rect.height*dpr;
+  const ctx=canvas.getContext('2d');ctx.scale(dpr,dpr);
+  const W=rect.width,H=rect.height;const originX=W/2,originY=H-4;
+  const colors=['#ff6f61','#6ec6ff','#ffd54f','#81c784','#b39ddb','#ff8a65','#4dd0e1','#f06292','#a5d6a7','#fff176'];
+  const particles=[];
+  for(let i=0;i<count;i++){
+    const angle=(Math.PI/2)+(Math.random()*Math.PI/4-Math.PI/8);
+    const speed=6+Math.random()*7;const size=3+Math.random()*5;
+    particles.push({x:originX+(Math.random()*40-20),y:originY,vx:Math.cos(angle)*speed,vy:-Math.sin(angle)*speed,g:0.18+Math.random()*0.14,w:size,h:size*(0.8+Math.random()*0.6),rot:Math.random()*Math.PI,spin:(Math.random()-0.5)*0.25,color:colors[i%colors.length],alpha:1,life:900+Math.random()*800});
   }
-
-  const colors = ['#ff6f61','#6ec6ff','#ffd54f','#81c784','#b39ddb','#ff8a65','#4dd0e1','#f06292','#a5d6a7','#fff176'];
-  const shapes = ['rect','circle','rect','rect','circle', (sparkles ? 'star' : 'rect')];
-
-  const particles = [];
-  for (let i = 0; i < count; i++) {
-    const org = emitOrigins[i % emitOrigins.length];
-    const angle = (Math.PI / 2) + (Math.random() * Math.PI / 4 - Math.PI / 8); // 67.5°〜112.5°
-    const speed = 6 + Math.random() * 7;
-    const size = 3 + Math.random() * 5;
-    particles.push({
-      x: org.x + (Math.random() * 40 - 20),
-      y: org.y,
-      vx: Math.cos(angle) * speed,
-      vy: -Math.sin(angle) * speed,
-      g: 0.18 + Math.random() * 0.14,
-      w: size, h: size * (0.8 + Math.random()*0.6),
-      rot: Math.random() * Math.PI,
-      spin: (Math.random() - 0.5) * 0.25,
-      color: colors[i % colors.length],
-      shape: shapes[i % shapes.length],
-      alpha: 1,
-      life: 900 + Math.random() * 800
-    });
-  }
-
-  const start = performance.now();
-  return new Promise(resolve => {
-    function tick(now) {
-      const elapsed = now - start;
-      const dt = 1; // 簡易
-
-      const ctx2d = ctx;
-      ctx2d.clearRect(0, 0, W, H);
-
-      for (const p of particles) {
-        p.vy += p.g * 0.06 * dt;
-        p.x += p.vx * dt;
-        p.y += p.vy * dt;
-        p.rot += p.spin * dt;
-        p.alpha = Math.max(0, 1 - elapsed / p.life);
-
-        ctx2d.globalAlpha = p.alpha;
-        ctx2d.fillStyle = p.color;
-
-        if (p.shape === 'rect') {
-          ctx2d.save(); ctx2d.translate(p.x, p.y); ctx2d.rotate(p.rot);
-          ctx2d.fillRect(-p.w/2, -p.h/2, p.w, p.h); ctx2d.restore();
-        } else if (p.shape === 'circle') {
-          ctx2d.beginPath(); ctx2d.arc(p.x, p.y, p.w/2, 0, Math.PI*2); ctx2d.fill();
-        } else if (p.shape === 'star') {
-          drawStar(ctx2d, p.x, p.y, 5, p.w, p.w/2, p.rot, p.color);
-        }
-
-        ctx2d.globalAlpha = 1;
+  const start=performance.now();
+  return new Promise(resolve=>{
+    function tick(now){
+      const elapsed=now-start;ctx.clearRect(0,0,W,H);
+      for(const p of particles){
+        p.vy+=p.g*0.06;p.x+=p.vx;p.y+=p.vy;p.rot+=p.spin;p.alpha=Math.max(0,1-elapsed/p.life);
+        ctx.globalAlpha=p.alpha;ctx.fillStyle=p.color;
+        ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.rot);ctx.fillRect(-p.w/2,-p.h/2,p.w,p.h);ctx.restore();
+        ctx.globalAlpha=1;
       }
-
-      if (elapsed < duration) {
-        requestAnimationFrame(tick);
-      } else {
-        ctx2d.clearRect(0, 0, W, H);
-        resolve();
-      }
+      if(elapsed<duration)requestAnimationFrame(tick);else{ctx.clearRect(0,0,W,H);resolve();}
     }
     requestAnimationFrame(tick);
   });
 }
-function drawStar(ctx, x, y, spikes, outerR, innerR, rot, color) {
-  let rotA = Math.PI / 2 * 3;
-  let step = Math.PI / spikes;
-
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(rot);
-  ctx.beginPath();
-  ctx.moveTo(0, -outerR);
-  for (let i = 0; i < spikes; i++) {
-    ctx.lineTo(Math.cos(rotA) * outerR, Math.sin(rotA) * outerR);
-    rotA += step;
-    ctx.lineTo(Math.cos(rotA) * innerR, Math.sin(rotA) * innerR);
-    rotA += step;
-  }
-  ctx.closePath();
-  ctx.fillStyle = color;
-  ctx.fill();
-  ctx.restore();
-}
 
 // =====================
-//  ごほうび（セッション終了）
+//  ごほうび履歴
 // =====================
-const REWARD_ICONS = [
-  // 動物
-  '🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯',
-  '🦁','🐮','🐷','🐸','🐵','🦄',
-  // 果物
-  '🍎','🍐','🍊','🍋','🍌','🍉','🍇','🍓','🍒','🍑',
-  '🥭','🍍','🥝','🍈'
-]; // 合計30
-
-function showRewardIcon() {
-  const spot = document.getElementById('stickerSpot');
-  if (!spot) return null;
-  const icon = REWARD_ICONS[Math.floor(Math.random() * REWARD_ICONS.length)];
-  spot.textContent = icon;
-  return icon;
-}
-
-// ---- ごほうび履歴（直近30日・日付降順で表示） ----
-function addRewardHistory(icon) {
-  if (!icon) return;
-  const key = 'rewards.history';
-  const data = JSON.parse(localStorage.getItem(key) || '{}'); // { 'YYYY-MM-DD': ['🍎','🐶', ...] }
-  const todayKey = dateKey(new Date());
-  data[todayKey] = Array.isArray(data[todayKey]) ? data[todayKey] : [];
-  data[todayKey].push(icon);
-  localStorage.setItem(key, JSON.stringify(data));
-}
-function getRewardHistory() {
-  const key = 'rewards.history';
-  return JSON.parse(localStorage.getItem(key) || '{}');
-}
-function renderRewardsList() {
-  const wrap = document.getElementById('rewardsList');
-  wrap.innerHTML = '';
-
-  const data = getRewardHistory(); // {dateKey: [icons]}
-  const keys = Object.keys(data);
-  if (!keys.length) {
-    const empty = document.createElement('p');
-    empty.className = 'hint';
-    empty.textContent = 'まだ ごほうび は ありません';
-    wrap.appendChild(empty);
-    return;
-  }
-
-  // 日付降順・直近30日まで
-  keys.sort((a,b) => (a < b ? 1 : -1));
-  const limited = keys.slice(0, 30);
-
-  for (const k of limited) {
-    const row = document.createElement('div');
-    row.className = 'reward-day';
-
-    const dateEl = document.createElement('div');
-    dateEl.className = 'reward-date';
-    dateEl.textContent = formatJaMd(k); // 「11月11日」のように表示
-
-    const iconsEl = document.createElement('div');
-    iconsEl.className = 'reward-icons';
-    (data[k] || []).forEach(icon => {
-      const span = document.createElement('span');
-      span.textContent = icon;
-      iconsEl.appendChild(span);
-    });
-
-    row.appendChild(dateEl);
-    row.appendChild(iconsEl);
-    wrap.appendChild(row);
-  }
-}
-function dateKey(d) {
-  // ローカル日付で YYYY-MM-DD
-  const year = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${m}-${day}`;
-}
-function formatJaMd(key) {
-  const [y, m, d] = key.split('-').map(n => Number(n));
-  return `${m}月${d}日`;
-}
+const REWARD_ICONS=['🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯','🦁','🐮','🐷','🐸','🐵','🦄','🍎','🍐','🍊','🍋','🍌','🍉','🍇','🍓','🍒','🍑','🥭','🍍','🥝','🍈'];
+function showRewardIcon(){const spot=document.getElementById('stickerSpot');const icon=REWARD_ICONS[Math.floor(Math.random()*REWARD_ICONS.length)];spot.textContent=icon;return icon;}
+function addRewardHistory(icon){const key='rewards.history';const data=JSON.parse(localStorage.getItem(key)||'{}');const today=dateKey(new Date());data[today]=data[today]||[];data[today].push(icon);localStorage.setItem(key,JSON.stringify(data));}
+function renderRewardsList(){const wrap=document.getElementById('rewardsList');wrap.innerHTML='';const data=JSON.parse(localStorage.getItem('rewards.history')||'{}');const keys=Object.keys(data).sort((a,b)=>a<b?1:-1).slice(0,30);if(!keys.length){wrap.innerHTML='<p class=\"hint\">まだ ごほうび は ありません</p>';return;}keys.forEach(k=>{const row=document.createElement('div');row.className='reward-day';const dateEl=document.createElement('div');dateEl.className='reward-date';dateEl.textContent=formatJaMd(k);const iconsEl=document.createElement('div');iconsEl.className='reward-icons';data[k].forEach(ic=>{const span=document.createElement('span');span.textContent=ic;iconsEl.appendChild(span);});row.appendChild(dateEl);row.appendChild(iconsEl);wrap.appendChild(row);});}
+function dateKey(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
+function formatJaMd(key){const [y,m,d]=key.split('-').map(Number);return `${m}月${d}日`;}
 
 // =====================
-//  ホームの出題設定UI
+//  ホームUI
 // =====================
-function populateHomeFilters() {
-  const minMaxEl = document.getElementById('rangeMinMax');
-  const startEl = document.getElementById('rangeStart');
-  const endEl = document.getElementById('rangeEnd');
-  const posWrap = document.getElementById('posFilter');
-
-  const { minSeq, maxSeq, posSet } = state.dataset;
-  if (minSeq == null || maxSeq == null) return;
-
-  // 通番の初期表示
-  minMaxEl.textContent = `${minSeq} 〜 ${maxSeq}`;
-  startEl.value = minSeq;
-  endEl.value = maxSeq;
-
-  // 品詞チップを生成（既定で全選択）
-  posWrap.innerHTML = '';
-  [...posSet].sort().forEach(p => {
-    const chip = document.createElement('button');
-    chip.type = 'button';
-    chip.className = 'chip active';
-    chip.textContent = p;
-    chip.dataset.pos = p;
-    chip.onclick = () => {
-      chip.classList.toggle('active');
-    };
-    posWrap.appendChild(chip);
-  });
-}
-function readFilterInputs() {
-  const startEl = document.getElementById('rangeStart');
-  const endEl = document.getElementById('rangeEnd');
-  const posWrap = document.getElementById('posFilter');
-
-  const start = Number(startEl.value);
-  const end   = Number(endEl.value);
-
-  // 値の正規化
-  let s = Number.isFinite(start) ? start : state.dataset.minSeq;
-  let e = Number.isFinite(end)   ? end   : state.dataset.maxSeq;
-  if (s > e) [s, e] = [e, s]; // 逆転時スワップ
-
-  // 品詞選択（未選択なら全品詞扱い）
-  const actives = [...posWrap.querySelectorAll('.chip.active')].map(el => el.dataset.pos);
-  const posSelected = new Set(actives.length ? actives : [...state.dataset.posSet]);
-
-  state.filters = { start: s, end: e, posSelected };
-}
-function showStartError(msg, show) {
-  const el = document.getElementById('startError');
-  if (!show) { el.hidden = true; el.textContent = ''; return; }
-  el.hidden = false; el.textContent = msg;
-}
-
-// =====================
-//  保存・設定
-// =====================
-function saveSticker(seq) {
-  const key = 'stickers.earned';
-  const cur = JSON.parse(localStorage.getItem(key) || '[]');
-  if (!cur.includes(seq)) cur.push(seq);
-  localStorage.setItem(key, JSON.stringify(cur));
-}
-function loadSettings() {
-  const s = JSON.parse(localStorage.getItem('settings') || '{}');
-  if (s.sessionSize) state.sessionSize = s.sessionSize;
-  if (s.tts) state.tts = { ...state.tts, ...s.tts };
-}
-function saveSettings() {
-  localStorage.setItem('settings', JSON.stringify({ sessionSize: state.sessionSize, tts: state.tts }));
-}
-function logDev(msg) {
-  const el = document.getElementById('devLog');
-  if (el) el.textContent += `[${new Date().toLocaleTimeString()}] ${msg}\n`;
-  console.log(msg);
-}
+function populateHomeFilters(){const minMaxEl=document.getElementById('rangeMinMax');const startEl=document.getElementById('rangeStart');const endEl=document.getElementById('rangeEnd');const posWrap=document.getElementById('posFilter');const {minSeq,maxSeq,posSet}=state.dataset;if(minSeq==null)return;minMaxEl.textContent=`${minSeq}〜${maxSeq}`;startEl.value=minSeq;endEl.value=maxSeq;posWrap.innerHTML='';[...posSet].sort().forEach(p=>{const chip=document.createElement('button');chip.type='button';chip.className='chip active';chip.textContent=p;chip.dataset.pos=p;chip.onclick=()=>chip.classList.toggle('active');posWrap.appendChild(chip);});}
+function readFilterInputs(){const s=Number(document.getElementById('rangeStart').value);const e=Number(document.getElementById('rangeEnd').value);let start=Number.isFinite(s)?s:state.dataset.minSeq;let end=Number.isFinite(e)?e:state.dataset.maxSeq;if(start>end)[start,end]=[end,start];const actives=[...document.querySelectorAll('#posFilter .chip.active')].map(el=>el.dataset.pos);const posSelected=new Set(actives.length?actives:[...state.dataset.posSet]);state.filters={start,end,posSelected};}
+function showStartError(msg,show){const el=document.getElementById('startError');if(!show){el.hidden=true;el.textContent='';return;}el.hidden=false;el.textContent=msg;}
 
 // =====================
 //  セッション制御
+// =====================
+// =====================
+//  セッション制御（続き）
 // =====================
 function startSession() {
   if (!state.entries.length) {
@@ -555,15 +339,11 @@ function startSession() {
     show('parent');
     return;
   }
-
-  // 入力値からフィルタ確定
   readFilterInputs();
   applyFilters();
 
-  // 最低4件ないと4択が成立しない
   if (state.filtered.length < 4) {
-    const msg = `出題範囲に ${state.filtered.length} 件しかありません（4件以上必要です）。通番や品詞を見直してください。`;
-    showStartError(msg, true);
+    showStartError(`出題範囲に ${state.filtered.length} 件しかありません（4件以上必要です）。通番や品詞を見直してください。`, true);
     return;
   }
   showStartError('', false);
@@ -572,8 +352,13 @@ function startSession() {
   state.lastSeenIds = [];
   nextRound();     // 最初の問題
   show('quiz');
-  state.current && speakWord(state.current.word); // 開始時に英単語を読み上げ
+
+  // 開始時に英単語を読み上げ（ヘッダの🔊でも再生可能）
+  if (state.current) {
+    speakWithSelectedVoice(state.current.word);
+  }
 }
+
 function nextRound() {
   state.current = pickNext();
   if (!state.current) {
@@ -586,12 +371,54 @@ function nextRound() {
 }
 
 // =====================
-//  イベント
+//  保存・設定
+// =====================
+function saveSticker(seq) {
+  const key = 'stickers.earned';
+  const cur = JSON.parse(localStorage.getItem(key) || '[]');
+  if (!cur.includes(seq)) cur.push(seq);
+  localStorage.setItem(key, JSON.stringify(cur));
+}
+
+function loadSettings() {
+  const s = JSON.parse(localStorage.getItem('settings') || '{}');
+  if (s.sessionSize) state.sessionSize = s.sessionSize;
+  // 既定の英語音声（名前）は VOICE_STORAGE_KEY に保存済みなので、initVoiceSelect() 側で復元します
+}
+
+function saveSettings() {
+  localStorage.setItem('settings', JSON.stringify({
+    sessionSize: state.sessionSize
+  }));
+}
+
+function logDev(msg) {
+  const el = document.getElementById('devLog');
+  const line = `[${new Date().toLocaleTimeString()}] ${msg}\n`;
+  if (el) el.textContent += line;
+  // consoleにも出力
+  // eslint-disable-next-line no-console
+  console.log(msg);
+}
+
+// =====================
+//  画面切替
+// =====================
+const screens = ['home', 'quiz', 'reward', 'rewards', 'parent'];
+function show(id) {
+  screens.forEach(s => document.getElementById(s).classList.remove('active'));
+  const el = document.getElementById(id);
+  if (el) el.classList.add('active');
+}
+
+// =====================
+//  初期化・イベント
 // =====================
 window.addEventListener('DOMContentLoaded', () => {
   loadSettings();
+  initVoiceSelect(); // TOPの英語音声選択UI
 
-  // キャンバス解像度更新
+  // 紙吹雪キャンバスをリサイズ（描画は正答時のみ）
   const resizeCanvas = () => {
     const canvas = document.getElementById('confetti');
     if (!canvas) return;
@@ -617,15 +444,17 @@ window.addEventListener('DOMContentLoaded', () => {
       logDev('sample.csv を読み込めませんでした（保護者メニューからCSVを読み込んでください）');
     });
 
-  // ホーム
+  // --- ホーム
   document.getElementById('startBtn').onclick = () => startSession();
   document.getElementById('rewardsBtn').onclick = () => { renderRewardsList(); show('rewards'); };
   document.getElementById('parentBtn').onclick = () => show('parent');
 
-  // クイズ
-  document.getElementById('quizReplayBtn').onclick = () => state.current && speakWord(state.current.word);
+  // --- クイズ
+  document.getElementById('quizReplayBtn').onclick = () => {
+    if (state.current) speakWithSelectedVoice(state.current.word);
+  };
 
-  // ごほうび（セッション終了画面）
+  // --- ごほうび（セッション終了画面）
   document.getElementById('nextRoundBtn').onclick = () => {
     state.progressCount = 0;
     // フィルタは維持（同条件で続ける）
@@ -637,14 +466,14 @@ window.addEventListener('DOMContentLoaded', () => {
     }
     nextRound();
     show('quiz');
-    state.current && speakWord(state.current.word);
+    if (state.current) speakWithSelectedVoice(state.current.word);
   };
   document.getElementById('toHomeBtn').onclick = () => show('home');
 
-  // ごほうび一覧
+  // --- ごほうび一覧
   document.getElementById('rewardsBackBtn').onclick = () => show('home');
 
-  // 保護者ゲート
+  // --- 保護者ゲート
   let holdTimer = null, held = false;
   const holdBtn = document.getElementById('holdButton');
   const clearHold = () => { clearTimeout(holdTimer); };
@@ -654,6 +483,7 @@ window.addEventListener('DOMContentLoaded', () => {
   });
   holdBtn.addEventListener('pointerup', clearHold);
   holdBtn.addEventListener('pointerleave', clearHold);
+
   document.getElementById('enterParent').onclick = () => {
     const ok = held && Number(document.getElementById('gateAnswer').value) === 3;
     if (ok) {
@@ -661,13 +491,14 @@ window.addEventListener('DOMContentLoaded', () => {
       document.getElementById('parentPanel').hidden = false;
     }
   };
+
   document.getElementById('backHome').onclick = () => {
     document.getElementById('parentGate').hidden = false;
     document.getElementById('parentPanel').hidden = true;
     show('home');
   };
 
-  // CSV入力（再読込でUI再構築）
+  // --- CSV入力（再読込でUI再構築）
   document.getElementById('csvInput').addEventListener('change', async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -677,22 +508,13 @@ window.addEventListener('DOMContentLoaded', () => {
     if (state.entries.length) populateHomeFilters();
   });
 
-  // 設定反映
+  // --- 設定（出題数のみ保持）
   document.getElementById('sessionSize').addEventListener('change', (e) => {
     state.sessionSize = Number(e.target.value);
     saveSettings();
   });
-  document.getElementById('ttsLang').addEventListener('change', (e) => {
-    state.tts.lang = e.target.value; saveSettings();
-  });
-  document.getElementById('ttsRate').addEventListener('input', (e) => {
-    state.tts.rate = Number(e.target.value); saveSettings();
-  });
-  document.getElementById('ttsPitch').addEventListener('input', (e) => {
-    state.tts.pitch = Number(e.target.value); saveSettings();
-  });
 
-  // 通番入力の軽微なバリデーション（エラーは開始時に集約表示）
+  // --- 通番入力の軽微なバリデーション（エラーは開始時に集約表示）
   const rs = document.getElementById('rangeStart');
   const re = document.getElementById('rangeEnd');
   [rs, re].forEach(el => el.addEventListener('change', () => {
@@ -703,177 +525,4 @@ window.addEventListener('DOMContentLoaded', () => {
       showStartError('', false);
     }
   }));
-
-  // 進捗リセット
-  document.getElementById('resetProgress').onclick = () => {
-    localStorage.removeItem('stickers.earned');
-    localStorage.removeItem('settings');
-    localStorage.removeItem('rewards.history'); // ごほうび履歴もクリア
-    logDev('進捗・設定・ごほうび履歴をリセットしました');
-  };
-
-  // ===== PWA: Service Worker registration =====
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js')
-      .catch(err => console.error('SW registration failed:', err));
-  });
-}
-
-// =====================
-//  TOPの英語音声選択（getVoices）
-// =====================
-const VOICE_STORAGE_KEY = 'tts.en.voiceName';
-
-function initVoiceSelect() {
-  const sel = document.getElementById('voiceSelect');
-  const testBtn = document.getElementById('voiceTestBtn');
-  if (!sel || !testBtn) return;
-
-  // 既存設定の復元
-  const savedName = localStorage.getItem(VOICE_STORAGE_KEY);
-
-  // 音声一覧を構築
-  const buildOptions = () => {
-    const voices = speechSynthesis.getVoices() || [];
-    // 英語系を抽出（en-*）。Siri/自然音声っぽい名前を優先的に上に
-    const enVoices = voices
-      .filter(v => /^en(-|_)/i.test(v.lang))
-      .sort((a, b) => {
-        const as = scoreVoice(a), bs = scoreVoice(b);
-        if (as !== bs) return bs - as;
-        return (a.name || '').localeCompare(b.name || '');
-      });
-
-    sel.innerHTML = '';
-    if (!enVoices.length) {
-      const opt = document.createElement('option');
-      opt.value = '';
-      opt.textContent = '（英語の音声が みつかりません）';
-      sel.appendChild(opt);
-      sel.disabled = true;
-      testBtn.disabled = true;
-      return;
-    }
-
-    sel.disabled = false;
-    testBtn.disabled = false;
-
-    enVoices.forEach(v => {
-      const opt = document.createElement('option');
-      opt.value = v.name;
-      opt.textContent = `${v.name} (${v.lang})`;
-      sel.appendChild(opt);
-    });
-
-    // 保存済みの音声を選択 or 先頭を既定
-    const defaultIndex = enVoices.findIndex(v => v.name === savedName);
-    sel.selectedIndex = (defaultIndex >= 0) ? defaultIndex : 0;
-
-    // 状態へ反映
-    const chosen = enVoices[sel.selectedIndex];
-    state.tts.voice = chosen || null;
-    localStorage.setItem(VOICE_STORAGE_KEY, chosen?.name || '');
-  };
-
-  // 音声リストの「自然音声」優先度付け（簡易スコア）
-  function scoreVoice(v) {
-    const name = (v.name || '').toLowerCase();
-    let s = 0;
-    if (/siri/.test(name)) s += 5;         // iOS Siri系（自然）
-    if (/enhanced|premium|natural/.test(name)) s += 3;  // 強化音声
-    if (/en-us/.test((v.lang||'').toLowerCase())) s += 2; // en-USを少し優先
-    return s;
-  }
-
-  // 変更ハンドラ
-  sel.addEventListener('change', () => {
-    const voices = speechSynthesis.getVoices() || [];
-    const picked = voices.find(v => v.name === sel.value);
-    state.tts.voice = picked || null;
-    localStorage.setItem(VOICE_STORAGE_KEY, picked?.name || '');
-  });
-
-  // テスト再生：「Hello! Nice to meet you!」
-  testBtn.addEventListener('click', () => {
-    const text = 'Hello! Nice to meet you!';
-    speakWithSelectedVoice(text);
-  });
-
-  // iOS対策：イベント＋一定間隔でリトライ
-  let retries = 0;
-  const maxRetries = 10; // 約5秒（500ms * 10）
-  const tryBuild = () => {
-    buildOptions();
-    if ((speechSynthesis.getVoices() || []).length === 0 && retries < maxRetries) {
-      retries++;
-      setTimeout(tryBuild, 500);
-    }
-  };
-
-  // 主要イベント
-  window.speechSynthesis.onvoiceschanged = () => buildOptions();
-  // 初期呼び出し
-  tryBuild();
-}
-
-// 選択した音声を使って話す（英語のみ）
-function speakWithSelectedVoice(text) {
-  try {
-    const u = new SpeechSynthesisUtterance(text);
-    // 既存の英語設定を踏襲
-    u.lang = state.tts.lang || 'en-US';
-    u.rate = state.tts.rate;
-    u.pitch = state.tts.pitch;
-    u.volume = state.tts.volume;
-
-    // 選択音声を適用
-    if (state.tts.voice && /^en(-|_)/i.test(state.tts.voice.lang)) {
-      u.voice = state.tts.voice;
-    }
-    speechSynthesis.cancel();
-    speechSynthesis.speak(u);
-  } catch (e) {
-    logDev(`TTSテスト再生エラー: ${e?.message || e}`);
-  }
-}
-
-// 既存の英→日シーケンスを選択音声で上書き（英語側のみ）
-function speakSequenceEnJa(word, japanese) {
-  return new Promise(resolve => {
-    try {
-      const u1 = new SpeechSynthesisUtterance(word);
-      u1.lang = state.tts.lang || 'en-US';
-      u1.rate = state.tts.rate;
-      u1.pitch = state.tts.pitch;
-      u1.volume = state.tts.volume;
-      if (state.tts.voice && /^en(-|_)/i.test(state.tts.voice.lang)) {
-        u1.voice = state.tts.voice;
-      }
-
-      const u2 = new SpeechSynthesisUtterance(japanese);
-      u2.lang = 'ja-JP';
-      u2.rate = 0.95;
-      u2.pitch = 1.05;
-      u2.volume = 0.8;
-
-      u1.onend = () => speechSynthesis.speak(u2);
-      u2.onend = resolve;
-      u1.onerror = () => { logDev('TTS英語エラー'); resolve(); };
-      u2.onerror = () => { logDev('TTS日本語エラー'); resolve(); };
-
-      speechSynthesis.cancel();
-      speechSynthesis.speak(u1);
-    } catch (e) {
-      logDev(`TTSシーケンス例外: ${e?.message || e}`);
-      resolve();
-    }
-  });
-}
-
-// 初期化フックに追加（DOMContentLoaded内）
-window.addEventListener('DOMContentLoaded', () => {
-  initVoiceSelect();  // ← 追加
-});  
-  
 });
